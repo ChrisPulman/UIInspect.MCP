@@ -1,0 +1,40 @@
+<svg width="480" height="480" viewBox="0 0 480 480" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0078D4"/>
+      <stop offset="100%" stop-color="#00E5FF"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="480" height="480" rx="32" fill="#0F141A"/>
+
+  <!-- Multi-Framework Visual Tree -->
+  <g stroke="url(#accent)" stroke-width="8" fill="none">
+    <!-- Root -->
+    <circle cx="240" cy="100" r="50"/>
+
+    <!-- Branches -->
+    <line x1="240" y1="150" x2="240" y2="260"/>
+
+    <!-- Framework Nodes -->
+    <circle cx="120" cy="360" r="40"/>
+    <circle cx="240" cy="360" r="40"/>
+    <circle cx="360" cy="360" r="40"/>
+
+    <!-- Connections -->
+    <line x1="240" y1="260" x2="120" y2="360"/>
+    <line x1="240" y1="260" x2="240" y2="360"/>
+    <line x1="240" y1="260" x2="360" y2="360"/>
+  </g>
+
+  <!-- Magnifying Glass -->
+  <g transform="translate(330, 80)">
+    <circle cx="0" cy="0" r="70" stroke="#00E5FF" stroke-width="10" fill="none"/>
+    <line x1="50" y1="50" x2="110" y2="110" stroke="#00E5FF" stroke-width="12" stroke-linecap="round"/>
+  </g>
+
+  <!-- Title -->
+  <text x="50%" y="450" font-family="Segoe UI" font-size="48" fill="#F5F7FA" text-anchor="middle">
+    UIInspect.MCP
+  </text>
+</svg>
