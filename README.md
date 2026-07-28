@@ -2,159 +2,130 @@
 
 <!-- mcp-name: io.github.chrispulman/uiinspect-mcp -->
 
-# UIInspect.MCP
+# UIInspect MCP Server
 
-UIInspect.MCP is a consent-gated C# Model Context Protocol server that gives AI agents semantic access to Windows applications through UI Automation 3 (UIA3). The MVP discovers and attaches to WPF, WinForms, WinUI, Avalonia, and .NET MAUI Windows application windows when those frameworks expose standard UIA providers. It returns a bounded control tree and performs deterministic actions against opaque element references instead of relying on pixel coordinates.
+`UIInspect.MCP.Server` is a consent-gated NuGet MCP server that gives AI agents semantic access to Windows applications through UI Automation 3 (UIA3). It discovers accessible application windows, returns bounded control trees, and performs deterministic actions against opaque element references instead of relying on screenshots or pixel coordinates.
 
-The host uses `ModelContextProtocol` 1.4.1, .NET 10, FlaUI 5.0 UIA3, stdio transport, TUnit, and Microsoft Testing Platform.
+The package runs as a local stdio server on .NET 10. WPF and WinForms are directly tested. Standard controls in WinUI, Avalonia, and .NET MAUI Windows applications may be reachable when they expose UI Automation providers, but those frameworks are not yet compatibility-certified.
 
-## MVP status
+## Quick Install
 
-Implemented:
+Once the package is available on NuGet.org, click to install it in your preferred environment:
 
-- Top-level window discovery with process-instance identity and native handles.
-- Explicit trusted Windows approval dialog for each process instance.
-- Attach by process ID with optional native window handle.
-- Bounded, flattened UIA control-tree snapshots.
-- Opaque, generation-scoped element references plus explanatory semantic paths.
-- Password-element redaction and no control-value collection during inspection.
-- Invoke, resolved click, ValuePattern set, SelectionItemPattern select, expand/collapse, and allowlisted logical keys.
-- Per-connected-stdio-client/process consent, expiry, PID-reuse checks, rate limits, append-only redacted JSONL audit, and deterministic session cleanup.
-- Deterministic WPF and WinForms fixture applications.
-- TUnit/MTP unit and live Windows integration tests.
+[![VS Code - Install UIInspect MCP](https://img.shields.io/badge/VS_Code-Install_UIInspect_MCP-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=uiinspect-mcp&config=%7B%22type%22%3A%22stdio%22%2C%22command%22%3A%22dnx%22%2C%22args%22%3A%5B%22UIInspect.MCP.Server%400.%2A%22%2C%22--prerelease%22%2C%22--yes%22%5D%7D)
+[![VS Code Insiders - Install UIInspect MCP](https://img.shields.io/badge/VS_Code_Insiders-Install_UIInspect_MCP-24bfa5?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=uiinspect-mcp&config=%7B%22type%22%3A%22stdio%22%2C%22command%22%3A%22dnx%22%2C%22args%22%3A%5B%22UIInspect.MCP.Server%400.%2A%22%2C%22--prerelease%22%2C%22--yes%22%5D%7D&quality=insiders)
+[![Visual Studio - Install UIInspect MCP](https://img.shields.io/badge/Visual_Studio-Install_UIInspect_MCP-5C2D91?style=flat-square&logo=visualstudio&logoColor=white)](https://vs-open.link/mcp-install?%7B%22name%22%3A%22UIInspect.MCP.Server%22%2C%22type%22%3A%22stdio%22%2C%22command%22%3A%22dnx%22%2C%22args%22%3A%5B%22UIInspect.MCP.Server%400.%2A%22%2C%22--prerelease%22%2C%22--yes%22%5D%7D)
 
-Deferred to later milestones:
+Note:
 
-- XAML source/visual trees, dependency properties, bindings, validation, DataContext, command diagnostics, and hot reload hooks. UIA does not expose these; they require the explicitly enabled in-process agent described by the design.
-- Screenshots/overlays, recording/replay, virtualization helpers, UIA2 fallback, TCP transport, and signed CI client tokens.
-- Dedicated WinUI, Avalonia, and MAUI fixture suites. Their standard controls can already be reached through UIA3, but each provider needs a separate compatibility suite and packaging/runtime setup.
+- These install links use the NuGet package identity `UIInspect.MCP.Server` and select the latest `0.*` prerelease.
+- The selected package must be available on NuGet.org. For an unpublished local build, expose the package directory as a NuGet feed and add `--source <feed-path>` to the `dnx` arguments.
+- UIInspect is Windows-only and requires an interactive desktop.
 
-No DLL injection, arbitrary reflection, OCR, screen scraping, shell execution, or generic property writes are present in the MVP.
-
-## Architecture
-
-```text
-MCP client
-   │ stdio JSON-RPC
-   ▼
-UIInspect.MCP.Server
-   │ tool adapters only
-   ▼
-UIInspect.MCP.Core
-   │ process-instance consent + authorization + rate limits + audit + sessions
-   ▼
-UIInspect.MCP.Windows
-   │ serialized FlaUI/UIA3 adapter + semantic locator re-resolution
-   ▼
-Target process accessibility provider
-```
-
-Projects:
-
-| Project | Responsibility |
-|---|---|
-| `UIInspect.MCP.Core` | Platform-neutral contracts, result models, consent registry, rate limiting, auditing, and coordinator |
-| `UIInspect.MCP.Windows` | Windows process identity, trusted consent UI, FlaUI UIA3 discovery/session adapter |
-| `UIInspect.MCP.Server` | MCP 1.4.1 stdio host and controlled tool registry |
-| `UIInspect.Sample.Wpf` | Deterministic WPF UIA fixture |
-| `UIInspect.Sample.WinForms` | Deterministic WinForms UIA fixture |
-| `UIInspect.MCP.Tests` | TUnit/MTP unit, host, and live UIA integration tests |
-
-The distributable tool assemblies target `net10.0` so they can be packaged as a .NET tool. They are explicitly annotated as Windows-only with `SupportedOSPlatform("windows")`; the WPF and WinForms fixtures retain Windows-specific target frameworks.
-
-## Build and test
-
-Requirements:
-
-- Windows 10/11 with an interactive desktop.
-- .NET SDK 10.0.301 or a compatible feature band.
-- The server must run in the same Windows logon session and at a sufficient integrity level for its target.
-
-```powershell
-.\build.cmd Compile --configuration Release
-dotnet test .\src\UIInspect.MCP.Tests\UIInspect.MCP.Tests.csproj -c Release --no-build --no-restore -- `
-  --coverage `
-  --coverage-settings .\eng\coverage.runsettings `
-  --coverage-output .\artifacts\coverage\coverage.cobertura.xml `
-  --coverage-output-format cobertura `
-  --report-trx `
-  --no-progress
-```
-
-The NUKE `ResolveVersion` target asks the server project's MinVer target for both `MinVerVersion` and `PackageVersion`. `SynchronizeVersion` then updates `.mcp/server.json` and the `dnx` installation command before compilation, while preserving the full MinVer value as `MinVerVersionOverride` for every child build. Run `.\build.cmd Pack --configuration Release` to apply the same pipeline and emit the tool package under `packages`.
-
-The coverage allowlist includes the three production assemblies and excludes only test assemblies, fixture applications, compiler-generated sources, and methods with a reviewed `ExcludeFromCodeCoverage` justification. The gate is 100% of eligible production code; inspect the Cobertura report for exact line and branch metrics.
-
-FlaUI 5.0 currently labels its modern package assets `net8.0-windows7.0`. The two distributable `net10.0` projects use `AssetTargetFallback` to select those assets, so NuGet reports `NU1701` until FlaUI publishes a compatible neutral or .NET 10 asset. The live WPF/WinForms UIA suite is the runtime compatibility gate; no warning is suppressed.
-
-## Run
-
-From source:
-
-```powershell
-dotnet run --project .\src\UIInspect.MCP.Server\UIInspect.MCP.Server.csproj -c Release
-```
-
-The MCP protocol owns stdout. All console logging goes to stderr.
-
-Install the packaged MCP server:
-
-```powershell
-dnx UIInspect.MCP.Server@0.1.0-alpha.0 --yes
-```
-
-Example local MCP client configuration:
+Manual MCP configuration using NuGet:
 
 ```json
 {
-  "servers": {
-    "uiinspect": {
+  "mcpServers": {
+    "uiinspect-mcp": {
       "type": "stdio",
-      "command": "dotnet",
+      "command": "dnx",
       "args": [
-        "run",
-        "--project",
-        "D:\\Projects\\Github\\chrispulman\\UIInspect.MCP\\src\\UIInspect.MCP.Server\\UIInspect.MCP.Server.csproj",
-        "-c",
-        "Release"
+        "UIInspect.MCP.Server@0.*",
+        "--prerelease",
+        "--yes"
       ]
     }
   }
 }
 ```
 
-The same stdio command can be used by Codex, VS Code, Visual Studio 2022/2026 MCP-capable agent integrations, and other MCP clients. Adjust only the client-specific configuration container. Tool parameters never accept a caller-supplied client identity: the one connected stdio transport is the authorization boundary for the server process.
+Some clients use `servers` instead of `mcpServers`; only the outer property name changes.
 
-Set `UIINSPECT_AUDIT_PATH` to override the default audit location at `%LOCALAPPDATA%\UIInspect.MCP\audit\actions.jsonl`.
+The package build synchronizes this command to its exact version:
+
+```powershell
+dnx UIInspect.MCP.Server@0.1.0-alpha.0 --yes
+```
+
+## Requirements
+
+- Windows 10 or Windows 11 with an interactive desktop.
+- A .NET 10 SDK that provides `dnx`.
+- UIInspect must run in the same Windows logon session as the target application.
+- UIInspect must run at a sufficient integrity level for the target. A non-elevated server cannot automate an elevated application.
+
+The MCP protocol owns stdout; server diagnostics are written to stderr.
+
+## What the package provides
+
+- Top-level window discovery with process-instance identity and native window handles.
+- A trusted, server-owned Windows approval dialog for each target process instance.
+- Attach by process ID with an optional native window handle.
+- Bounded, flattened UI Automation control-tree snapshots.
+- Opaque, generation-scoped element references with explanatory semantic paths.
+- Invoke, resolved click, ValuePattern set, SelectionItemPattern select, expand/collapse, and allowlisted logical-key actions.
+- Password-element redaction and no control-value collection during inspection.
+- Consent bound to the local stdio server principal, expiry and PID-reuse checks, rate limits, application-level append-only redacted JSONL auditing, and deterministic session cleanup.
+
+The current package deliberately does not provide XAML source or visual trees, dependency properties, bindings, validation, DataContext or command diagnostics, hot reload, screenshots, OCR, overlays, recording/replay, arbitrary reflection, shell execution, generic property writes, or TCP transport.
+
+## Consent and security
+
+UIInspect never treats an MCP request as user approval. The local user must approve the exact process instance and requested capabilities in a trusted Windows dialog before the server attaches.
+
+Inspection, interaction, and keyboard access are separate capabilities. Request only the minimum needed for the task. Grants are short-lived and bound to the local stdio server principal, exact process identity, Windows session, and approved capabilities. Tool parameters cannot supply or override that principal.
+
+Successful actions invalidate all current element references. Re-inspect before the next action so the server can semantically resolve the current UI rather than act on stale coordinates.
+
+The default audit file is:
+
+```text
+%LOCALAPPDATA%\UIInspect.MCP\audit\actions.jsonl
+```
+
+Set `UIINSPECT_AUDIT_PATH` for the MCP server process to use another location. Audit records exclude entered values, password content, clipboard data, screenshots, raw provider exceptions, and all keystrokes except the allowlisted logical key name. Appends are enforced at the application level; protect the audit directory with an ACL that grants access only to the server account and administrators.
+
+See the complete [security model](https://github.com/ChrisPulman/UIInspect.MCP/blob/main/docs/security.md) for consent scopes, rate limits, audit contents, integrity boundaries, and the threat model.
 
 ## MCP tools
 
-| Tool | Purpose | Consent |
+| Tool | Purpose | Required access |
 |---|---|---|
-| `uiinspect_discover_windows` | List top-level UIA windows | Rate-limited discovery |
+| `uiinspect_discover_windows` | List top-level UI Automation windows | Discovery |
 | `uiinspect_request_consent` | Show the trusted local approval dialog | Local user decision |
-| `uiinspect_attach` | Open an opaque session for PID/HWND | Inspect |
+| `uiinspect_attach` | Open an opaque session for a PID and optional HWND | Inspect |
 | `uiinspect_inspect_tree` | Return a bounded semantic snapshot | Inspect |
 | `uiinspect_invoke` | Use InvokePattern | Interact |
 | `uiinspect_click` | Click a semantically resolved element | Interact |
-| `uiinspect_set_value` | Use ValuePattern | Interact |
-| `uiinspect_set_text` | Text alias for ValuePattern | Interact |
+| `uiinspect_set_value` | Set a value through ValuePattern | Interact |
+| `uiinspect_set_text` | Set text through ValuePattern | Interact |
 | `uiinspect_select_item` | Use SelectionItemPattern | Interact |
 | `uiinspect_expand_collapse` | Use ExpandCollapsePattern | Interact |
 | `uiinspect_send_key` | Send one allowlisted logical key after focus | Keyboard |
-| `uiinspect_close_session` | Dispose a session | Session owner |
+| `uiinspect_close_session` | Dispose an attached session | Session owner |
 
-Every successful action invalidates the current element-reference generation. Call `uiinspect_inspect_tree` again before the next action.
-
-## Safe workflow
+## Recommended workflow
 
 1. Call `uiinspect_discover_windows`.
-2. Identify the intended process and window independently.
-3. Call `uiinspect_request_consent`; the local user must approve the exact process instance and capability set.
+2. Identify the intended process and window using independently known application context.
+3. Call `uiinspect_request_consent` with the minimum capabilities. The local user must approve the exact process instance.
 4. Call `uiinspect_attach`.
 5. Call `uiinspect_inspect_tree` with the smallest useful depth and node budget.
-6. Prefer pattern-first tools (`invoke`, `set_value`, `select_item`, `expand_collapse`) over `click` or keyboard.
-7. Re-inspect after every successful action.
-8. Call `uiinspect_close_session`.
+6. Select an element using its automation ID, control type, accessible name, patterns, and semantic path.
+7. Prefer `uiinspect_invoke`, `uiinspect_set_value` (or its `uiinspect_set_text` alias), `uiinspect_select_item`, or `uiinspect_expand_collapse`. Use `uiinspect_click` only when the provider does not expose InvokePattern, and use `uiinspect_send_key` only when keyboard consent was granted.
+8. Re-inspect after every successful action to obtain fresh element references.
+9. Call `uiinspect_close_session`.
 
-See [Security](docs/security.md) for the threat model and [MVP design](docs/mvp-design.md) for current boundaries and later milestones.
+Treat `pattern_not_supported`, `stale_element`, `target_changed`, and `consent_expired` as safe terminal results for that attempt. Re-inspect or request fresh consent as indicated; do not fall back to blind input.
+
+## Package contents
+
+The NuGet package contains:
+
+- The `uiinspect-mcp` .NET tool and its runtime dependencies.
+- `.mcp/server.json` MCP registry metadata.
+- `skills/uiinspect/SKILL.md` with the safe agent workflow.
+- This README and the detailed [MVP behavior and boundaries](https://github.com/ChrisPulman/UIInspect.MCP/blob/main/docs/mvp-design.md).
+
+The package uses `ModelContextProtocol` 1.4.1 and FlaUI 5.0 with UIA3.
