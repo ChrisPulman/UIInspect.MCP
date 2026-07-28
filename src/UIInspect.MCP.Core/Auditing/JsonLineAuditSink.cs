@@ -1,5 +1,6 @@
-// Copyright (c) 2026 Chris Pulman.
-// Licensed under the MIT license.
+// Copyright (c) 2023-2026 Chris Pulman and Contributors. All rights reserved.
+// Chris Pulman and Contributors licenses this file to you under the MIT license.
+// See the LICENSE file in the project root for full license information.
 using System.Text.Json;
 using UIInspect.MCP.Core.Abstractions;
 using UIInspect.MCP.Core.Models;
@@ -9,9 +10,16 @@ namespace UIInspect.MCP.Core.Auditing;
 /// <summary>Writes redacted audit events as append-only JSON lines.</summary>
 public sealed class JsonLineAuditSink : IAuditSink, IDisposable
 {
+    /// <summary>Serializer options for compact web-compatible JSON lines.</summary>
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    /// <summary>Serializes writers and disposal.</summary>
     private readonly SemaphoreSlim _gate = new(1, 1);
+
+    /// <summary>Absolute append-only audit file path.</summary>
     private readonly string _path;
+
+    /// <summary>Indicates whether the sink has been disposed.</summary>
     private bool _disposed;
 
     /// <summary>Initializes a new instance of the <see cref="JsonLineAuditSink"/> class.</summary>

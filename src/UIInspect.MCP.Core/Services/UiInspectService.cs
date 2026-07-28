@@ -1,5 +1,6 @@
-// Copyright (c) 2026 Chris Pulman.
-// Licensed under the MIT license.
+// Copyright (c) 2023-2026 Chris Pulman and Contributors. All rights reserved.
+// Chris Pulman and Contributors licenses this file to you under the MIT license.
+// See the LICENSE file in the project root for full license information.
 using System.Collections.Concurrent;
 using UIInspect.MCP.Core.Abstractions;
 using UIInspect.MCP.Core.Configuration;
@@ -11,83 +12,145 @@ namespace UIInspect.MCP.Core.Services;
 /// <summary>Coordinates consent, process identity, rate limits, audit, and UI Automation sessions.</summary>
 public sealed class UiInspectService : IAsyncDisposable
 {
+    /// <summary>Outcome written when an operation is rejected.</summary>
+    private const string DeniedOutcome = "denied";
+
+    /// <summary>Outcome written when an operation completes.</summary>
+    private const string CompletedOutcome = "completed";
+
+    /// <summary>Outcome written when consent is granted.</summary>
+    private const string AllowedOutcome = "allowed";
+
+    /// <summary>Outcome written when an operation fails.</summary>
+    private const string FailedOutcome = "failed";
+
+    /// <summary>Outcome written while a consent prompt is active.</summary>
+    private const string PendingOutcome = "pending";
+
+    /// <summary>Rate-limit error code.</summary>
+    private const string RateLimitedCode = "rate_limited";
+
+    /// <summary>Unavailable-target error code.</summary>
+    private const string TargetUnavailableCode = "target_unavailable";
+
+    /// <summary>Target-changed error code.</summary>
+    private const string TargetChangedCode = "target_changed";
+
+    /// <summary>User-denied-consent error code.</summary>
+    private const string ConsentDeniedCode = "consent_denied";
+
+    /// <summary>Missing-session error code.</summary>
+    private const string SessionNotFoundCode = "session_not_found";
+
+    /// <summary>Discovery operation name.</summary>
+    private const string DiscoverOperation = "discover";
+
+    /// <summary>Consent request operation name.</summary>
+    private const string RequestConsentOperation = "request_consent";
+
+    /// <summary>Attach operation name.</summary>
+    private const string AttachOperation = "attach";
+
+    /// <summary>Inspection operation name.</summary>
+    private const string InspectOperation = "inspect";
+
+    /// <summary>Session audit operation name.</summary>
+    private const string SessionOperation = "session";
+
+    /// <summary>Consent-requested audit event type.</summary>
+    private const string ConsentRequestedEvent = "consent_requested";
+
+    /// <summary>Consent-denied audit event type.</summary>
+    private const string ConsentDeniedEvent = "consent_denied";
+
+    /// <summary>Time range used by all local fixed-window rate limits.</summary>
     private static readonly TimeSpan RateWindow = TimeSpan.FromMinutes(1);
+
+    /// <summary>Stores active sessions keyed by their opaque identifiers.</summary>
     private readonly ConcurrentDictionary<string, SessionEntry> _sessions = new(StringComparer.Ordinal);
+
+    /// <summary>Writes redacted audit records.</summary>
     private readonly IAuditSink _auditSink;
+
+    /// <summary>Creates and operates platform UI Automation sessions.</summary>
     private readonly IUiAutomationBackend _backend;
+
+    /// <summary>Stores short-lived grants.</summary>
     private readonly ConsentRegistry _consentRegistry;
+
+    /// <summary>Obtains trusted local-user approval.</summary>
     private readonly IUserConsentPrompt _consentPrompt;
+
+    /// <summary>Provides response bounds and safety limits.</summary>
     private readonly UiInspectOptions _options;
+
+    /// <summary>Resolves target process instances.</summary>
     private readonly IProcessIdentityProvider _processes;
+
+    /// <summary>Enforces per-operation rate limits.</summary>
     private readonly IOperationRateLimiter _rateLimiter;
+
+    /// <summary>Provides the current UTC time.</summary>
     private readonly TimeProvider _timeProvider;
 
     /// <summary>Initializes a new instance of the <see cref="UiInspectService"/> class.</summary>
-    public UiInspectService(
-        IUiAutomationBackend backend,
-        IProcessIdentityProvider processes,
-        IUserConsentPrompt consentPrompt,
-        ConsentRegistry consentRegistry,
-        IOperationRateLimiter rateLimiter,
-        IAuditSink auditSink,
-        TimeProvider timeProvider,
-        UiInspectOptions options)
+    /// <param name="dependencies">Collaborating service dependencies.</param>
+    /// <param name="options">Safety and response bound options.</param>
+    public UiInspectService(UiInspectServiceDependencies dependencies, UiInspectOptions options)
     {
-        _backend = backend ?? throw new ArgumentNullException(nameof(backend));
-        _processes = processes ?? throw new ArgumentNullException(nameof(processes));
-        _consentPrompt = consentPrompt ?? throw new ArgumentNullException(nameof(consentPrompt));
-        _consentRegistry = consentRegistry ?? throw new ArgumentNullException(nameof(consentRegistry));
-        _rateLimiter = rateLimiter ?? throw new ArgumentNullException(nameof(rateLimiter));
-        _auditSink = auditSink ?? throw new ArgumentNullException(nameof(auditSink));
-        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        ArgumentNullException.ThrowIfNull(dependencies);
+        _backend = dependencies.Backend ?? throw new ArgumentNullException(nameof(dependencies.Backend));
+        _processes = dependencies.Processes ?? throw new ArgumentNullException(nameof(dependencies.Processes));
+        _consentPrompt = dependencies.ConsentPrompt ?? throw new ArgumentNullException(nameof(dependencies.ConsentPrompt));
+        _consentRegistry = dependencies.ConsentRegistry ?? throw new ArgumentNullException(nameof(dependencies.ConsentRegistry));
+        _rateLimiter = dependencies.RateLimiter ?? throw new ArgumentNullException(nameof(dependencies.RateLimiter));
+        _auditSink = dependencies.AuditSink ?? throw new ArgumentNullException(nameof(dependencies.AuditSink));
+        _timeProvider = dependencies.TimeProvider ?? throw new ArgumentNullException(nameof(dependencies.TimeProvider));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         ValidateOptions(options);
     }
 
     /// <summary>List top-level windows in the current desktop session.</summary>
-    public async ValueTask<UiResult<IReadOnlyList<WindowDescriptor>>> DiscoverAsync(
-        string clientId,
-        CancellationToken cancellationToken = default)
+    /// <param name="clientId">Untrusted client identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Visible top-level windows or a safe error.</returns>
+    public async ValueTask<UiResult<IReadOnlyList<WindowDescriptor>>> DiscoverAsync(string clientId, CancellationToken cancellationToken)
     {
         var clientHash = GetClientHash(clientId);
-        var limited = CheckRate($"discover:{clientHash}", _options.DiscoveryRatePerMinute);
+        var limited = CheckRate($"{DiscoverOperation}:{clientHash}", _options.DiscoveryRatePerMinute);
         if (limited is not null)
         {
-            await AuditAsync("discovery", "denied", clientHash, null, "discover", "rate_limited", cancellationToken);
-            return UiResult<IReadOnlyList<WindowDescriptor>>.Fail(
-                "rate_limited",
-                "Window discovery rate limit exceeded.",
-                limited);
+            await AuditAsync("discovery", DeniedOutcome, clientHash, null, DiscoverOperation, RateLimitedCode, cancellationToken).ConfigureAwait(false);
+            return UiResult<IReadOnlyList<WindowDescriptor>>.Fail(RateLimitedCode, "Window discovery rate limit exceeded.", limited);
         }
 
         var windows = await _backend.ListTopLevelWindowsAsync(cancellationToken).ConfigureAwait(false);
-        await AuditAsync("discovery", "completed", clientHash, null, "discover", null, cancellationToken);
+        await AuditAsync("discovery", CompletedOutcome, clientHash, null, DiscoverOperation, null, cancellationToken).ConfigureAwait(false);
         return UiResult<IReadOnlyList<WindowDescriptor>>.Ok(windows);
     }
 
     /// <summary>Request explicit local-user consent for one process instance.</summary>
-    public async ValueTask<UiResult<ConsentGrantInfo>> RequestConsentAsync(
-        int processId,
-        bool allowActions,
-        bool allowKeyboard,
-        string clientId,
-        CancellationToken cancellationToken = default)
+    /// <param name="processId">Target operating-system process identifier.</param>
+    /// <param name="allowActions">Whether interaction capability is requested.</param>
+    /// <param name="allowKeyboard">Whether logical keyboard capability is requested.</param>
+    /// <param name="clientId">Untrusted client identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Consent details or a safe error.</returns>
+    public async ValueTask<UiResult<ConsentGrantInfo>> RequestConsentAsync(int processId, bool allowActions, bool allowKeyboard, string clientId, CancellationToken cancellationToken)
     {
         var clientHash = GetClientHash(clientId);
         var target = await _processes.ResolveAsync(processId, cancellationToken).ConfigureAwait(false);
         if (target is null)
         {
-            await AuditAsync("consent_requested", "denied", clientHash, null, "request_consent", "target_unavailable", cancellationToken);
-            return UiResult<ConsentGrantInfo>.Fail("target_unavailable", "The target process is unavailable or inaccessible.");
+            await AuditAsync(ConsentRequestedEvent, DeniedOutcome, clientHash, null, RequestConsentOperation, TargetUnavailableCode, cancellationToken).ConfigureAwait(false);
+            return UiResult<ConsentGrantInfo>.Fail(TargetUnavailableCode, "The target process is unavailable or inaccessible.");
         }
 
-        var limited = CheckRate(
-            $"consent:{clientHash}:{target.ProcessId}:{target.StartedAtUtc.UtcTicks}",
-            _options.ConsentPromptRatePerMinute);
+        var limited = CheckRate($"consent:{clientHash}:{target.ProcessId}:{target.StartedAtUtc.UtcTicks}", _options.ConsentPromptRatePerMinute);
         if (limited is not null)
         {
-            await AuditAsync("consent_requested", "denied", clientHash, target, "request_consent", "rate_limited", cancellationToken);
-            return UiResult<ConsentGrantInfo>.Fail("rate_limited", "Consent prompt rate limit exceeded.", limited);
+            await AuditAsync(ConsentRequestedEvent, DeniedOutcome, clientHash, target, RequestConsentOperation, RateLimitedCode, cancellationToken).ConfigureAwait(false);
+            return UiResult<ConsentGrantInfo>.Fail(RateLimitedCode, "Consent prompt rate limit exceeded.", limited);
         }
 
         var capabilities = UiCapability.Inspect;
@@ -101,45 +164,46 @@ public sealed class UiInspectService : IAsyncDisposable
             capabilities |= UiCapability.Keyboard;
         }
 
-        await AuditAsync("consent_requested", "pending", clientHash, target, "request_consent", null, cancellationToken);
+        await AuditAsync(ConsentRequestedEvent, PendingOutcome, clientHash, target, RequestConsentOperation, null, cancellationToken).ConfigureAwait(false);
         var approved = await _consentPrompt.RequestAsync(target, capabilities, clientId, cancellationToken).ConfigureAwait(false);
         if (!approved)
         {
-            await AuditAsync("consent_denied", "denied", clientHash, target, "request_consent", "user_denied", cancellationToken);
-            return UiResult<ConsentGrantInfo>.Fail("consent_denied", "The local user denied access to the target process.");
+            await AuditAsync(ConsentDeniedEvent, DeniedOutcome, clientHash, target, RequestConsentOperation, "user_denied", cancellationToken).ConfigureAwait(false);
+            return UiResult<ConsentGrantInfo>.Fail(ConsentDeniedCode, "The local user denied access to the target process.");
         }
 
         var revalidated = await _processes.ResolveAsync(processId, cancellationToken).ConfigureAwait(false);
         if (revalidated != target)
         {
-            await AuditAsync("consent_denied", "denied", clientHash, target, "request_consent", "target_changed", cancellationToken);
-            return UiResult<ConsentGrantInfo>.Fail("target_changed", "The target process changed while consent was requested.");
+            await AuditAsync(ConsentDeniedEvent, DeniedOutcome, clientHash, target, RequestConsentOperation, TargetChangedCode, cancellationToken).ConfigureAwait(false);
+            return UiResult<ConsentGrantInfo>.Fail(TargetChangedCode, "The target process changed while consent was requested.");
         }
 
         var grant = _consentRegistry.Grant(clientHash, target, capabilities, _options.ConsentDuration);
-        await AuditAsync("consent_granted", "allowed", clientHash, target, "request_consent", null, cancellationToken);
-        return UiResult<ConsentGrantInfo>.Ok(
-            new ConsentGrantInfo(grant.Id, grant.Target, grant.Capabilities, grant.ExpiresAtUtc));
+        await AuditAsync("consent_granted", AllowedOutcome, clientHash, target, RequestConsentOperation, null, cancellationToken).ConfigureAwait(false);
+        return UiResult<ConsentGrantInfo>.Ok(new(grant.Id, grant.Target, grant.Capabilities, grant.ExpiresAtUtc));
     }
 
     /// <summary>Attach a consent-gated session by process ID and optional native window handle.</summary>
-    public async ValueTask<UiResult<AutomationSessionInfo>> AttachAsync(
-        int processId,
-        long? windowHandle,
-        string clientId,
-        CancellationToken cancellationToken = default)
+    /// <param name="processId">Target operating-system process identifier.</param>
+    /// <param name="windowHandle">Optional top-level native window handle.</param>
+    /// <param name="clientId">Untrusted client identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Attached session information or a safe error.</returns>
+    public async ValueTask<UiResult<AutomationSessionInfo>> AttachAsync(int processId, long? windowHandle, string clientId, CancellationToken cancellationToken)
     {
         var clientHash = GetClientHash(clientId);
         var target = await _processes.ResolveAsync(processId, cancellationToken).ConfigureAwait(false);
         if (target is null)
         {
-            return UiResult<AutomationSessionInfo>.Fail("target_unavailable", "The target process is unavailable or inaccessible.");
+            await AuditAsync(AttachOperation, DeniedOutcome, clientHash, null, AttachOperation, TargetUnavailableCode, cancellationToken).ConfigureAwait(false);
+            return UiResult<AutomationSessionInfo>.Fail(TargetUnavailableCode, "The target process is unavailable or inaccessible.");
         }
 
         var grant = _consentRegistry.FindActive(clientHash, target, UiCapability.Inspect);
         if (grant is null)
         {
-            await AuditAsync("attach", "denied", clientHash, target, "attach", "consent_required", cancellationToken);
+            await AuditAsync(AttachOperation, DeniedOutcome, clientHash, target, AttachOperation, "consent_required", cancellationToken).ConfigureAwait(false);
             return UiResult<AutomationSessionInfo>.Fail("consent_required", "Request local-user consent for this process instance before attaching.");
         }
 
@@ -149,101 +213,75 @@ public sealed class UiInspectService : IAsyncDisposable
         {
             await platformSession.DisposeAsync().ConfigureAwait(false);
             _ = _consentRegistry.RevokeTarget(target);
-            await AuditAsync("attach", "failed", clientHash, target, "attach", "target_changed", cancellationToken);
-            return UiResult<AutomationSessionInfo>.Fail("target_changed", "The target process changed while the session was attached.");
+            await AuditAsync(AttachOperation, FailedOutcome, clientHash, target, AttachOperation, TargetChangedCode, cancellationToken).ConfigureAwait(false);
+            return UiResult<AutomationSessionInfo>.Fail(TargetChangedCode, "The target process changed while the session was attached.");
         }
 
         var sessionId = $"s_{Guid.NewGuid():N}";
         var entry = new SessionEntry(clientHash, grant, platformSession);
         _sessions[sessionId] = entry;
 
-        await AuditAsync("attach", "completed", clientHash, target, "attach", null, cancellationToken);
-        return UiResult<AutomationSessionInfo>.Ok(
-            new AutomationSessionInfo(sessionId, target, platformSession.WindowHandle, grant.ExpiresAtUtc));
+        await AuditAsync(AttachOperation, CompletedOutcome, clientHash, target, AttachOperation, null, cancellationToken).ConfigureAwait(false);
+        return UiResult<AutomationSessionInfo>.Ok(new(sessionId, target, platformSession.WindowHandle, grant.ExpiresAtUtc));
     }
 
     /// <summary>Inspect the semantic UI tree for an attached session.</summary>
-    public async ValueTask<UiResult<UiTreeSnapshot>> InspectAsync(
-        string sessionId,
-        int maxDepth,
-        int maxNodes,
-        string clientId,
-        CancellationToken cancellationToken = default)
+    /// <param name="sessionId">Opaque session identifier.</param>
+    /// <param name="maxDepth">Maximum descendant depth.</param>
+    /// <param name="maxNodes">Maximum flattened node count.</param>
+    /// <param name="clientId">Untrusted client identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Bounded UI tree snapshot or a safe error.</returns>
+    public async ValueTask<UiResult<UiTreeSnapshot>> InspectAsync(string sessionId, int maxDepth, int maxNodes, string clientId, CancellationToken cancellationToken)
     {
         if (maxDepth < 0 || maxDepth > _options.MaximumTreeDepth)
         {
-            return UiResult<UiTreeSnapshot>.Fail(
-                "invalid_depth",
-                $"maxDepth must be between 0 and {_options.MaximumTreeDepth}.");
+            return UiResult<UiTreeSnapshot>.Fail("invalid_depth", $"maxDepth must be between 0 and {_options.MaximumTreeDepth}.");
         }
 
         if (maxNodes < 1 || maxNodes > _options.MaximumTreeNodes)
         {
-            return UiResult<UiTreeSnapshot>.Fail(
-                "invalid_node_limit",
-                $"maxNodes must be between 1 and {_options.MaximumTreeNodes}.");
+            return UiResult<UiTreeSnapshot>.Fail("invalid_node_limit", $"maxNodes must be between 1 and {_options.MaximumTreeNodes}.");
         }
 
-        var authorization = await AuthorizeSessionAsync(
-            sessionId,
-            clientId,
-            UiCapability.Inspect,
-            "inspect",
-            _options.InspectionRatePerMinute,
-            cancellationToken).ConfigureAwait(false);
+        var authorization = await AuthorizeSessionAsync(sessionId, clientId, UiCapability.Inspect, InspectOperation, _options.InspectionRatePerMinute, cancellationToken).ConfigureAwait(false);
         if (!authorization.Success)
         {
-            return UiResult<UiTreeSnapshot>.Fail(
-                authorization.Error!.Code,
-                authorization.Error.Message,
-                authorization.Error.RetryAfterMilliseconds is double milliseconds
-                    ? TimeSpan.FromMilliseconds(milliseconds)
-                    : null);
+            return UiResult<UiTreeSnapshot>.Fail(authorization.Error!.Code, authorization.Error.Message, ToRetryAfter(authorization.Error));
         }
 
         var entry = authorization.Data!;
         var snapshot = await entry.Session.InspectAsync(sessionId, maxDepth, maxNodes, cancellationToken).ConfigureAwait(false);
-        await AuditAsync("inspection", "completed", entry.ClientHash, entry.Session.Target, "inspect", null, cancellationToken);
+        await AuditAsync("inspection", CompletedOutcome, entry.ClientHash, entry.Session.Target, InspectOperation, null, cancellationToken).ConfigureAwait(false);
         return UiResult<UiTreeSnapshot>.Ok(snapshot);
     }
 
     /// <summary>Invoke an element through UI Automation InvokePattern.</summary>
-    public ValueTask<UiResult<ActionReceipt>> InvokeAsync(
-        string sessionId,
-        string elementReference,
-        string clientId,
-        CancellationToken cancellationToken = default) =>
-        ExecuteActionAsync(
-            sessionId,
-            elementReference,
-            clientId,
-            UiCapability.Interact,
-            "invoke",
-            static (session, reference, token) => session.InvokeAsync(reference, token),
-            cancellationToken);
+    /// <param name="sessionId">Opaque session identifier.</param>
+    /// <param name="elementReference">Opaque UI element reference.</param>
+    /// <param name="clientId">Untrusted client identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Action receipt or a safe error.</returns>
+    public ValueTask<UiResult<ActionReceipt>> InvokeAsync(string sessionId, string elementReference, string clientId, CancellationToken cancellationToken) =>
+        ExecuteActionAsync(sessionId, elementReference, clientId, UiCapability.Interact, "invoke", static (session, reference, token) => session.InvokeAsync(reference, token), cancellationToken);
 
     /// <summary>Click the center of a semantically resolved element.</summary>
-    public ValueTask<UiResult<ActionReceipt>> ClickAsync(
-        string sessionId,
-        string elementReference,
-        string clientId,
-        CancellationToken cancellationToken = default) =>
-        ExecuteActionAsync(
-            sessionId,
-            elementReference,
-            clientId,
-            UiCapability.Interact,
-            "click",
-            static (session, reference, token) => session.ClickAsync(reference, token),
-            cancellationToken);
+    /// <param name="sessionId">Opaque session identifier.</param>
+    /// <param name="elementReference">Opaque UI element reference.</param>
+    /// <param name="clientId">Untrusted client identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Action receipt or a safe error.</returns>
+    public ValueTask<UiResult<ActionReceipt>> ClickAsync(string sessionId, string elementReference, string clientId, CancellationToken cancellationToken) =>
+        ExecuteActionAsync(sessionId, elementReference, clientId, UiCapability.Interact, "click", static (session, reference, token) => session.ClickAsync(reference, token), cancellationToken);
 
-    /// <summary>Set text/value through UI Automation ValuePattern.</summary>
-    public ValueTask<UiResult<ActionReceipt>> SetValueAsync(
-        string sessionId,
-        string elementReference,
-        string value,
-        string clientId,
-        CancellationToken cancellationToken = default)
+    /// <summary>Set text or a value through UI Automation ValuePattern.</summary>
+    /// <param name="sessionId">Opaque session identifier.</param>
+    /// <param name="elementReference">Opaque UI element reference.</param>
+    /// <param name="value">Value to assign.</param>
+    /// <param name="clientId">Untrusted client identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Action receipt or a safe error.</returns>
+    public ValueTask<UiResult<ActionReceipt>> SetValueAsync(string sessionId, string elementReference, string value, string clientId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(value);
         return ExecuteActionAsync(
@@ -257,11 +295,12 @@ public sealed class UiInspectService : IAsyncDisposable
     }
 
     /// <summary>Select an item through UI Automation SelectionItemPattern.</summary>
-    public ValueTask<UiResult<ActionReceipt>> SelectAsync(
-        string sessionId,
-        string elementReference,
-        string clientId,
-        CancellationToken cancellationToken = default) =>
+    /// <param name="sessionId">Opaque session identifier.</param>
+    /// <param name="elementReference">Opaque UI element reference.</param>
+    /// <param name="clientId">Untrusted client identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Action receipt or a safe error.</returns>
+    public ValueTask<UiResult<ActionReceipt>> SelectAsync(string sessionId, string elementReference, string clientId, CancellationToken cancellationToken) =>
         ExecuteActionAsync(
             sessionId,
             elementReference,
@@ -272,12 +311,13 @@ public sealed class UiInspectService : IAsyncDisposable
             cancellationToken);
 
     /// <summary>Expand or collapse an element through UI Automation ExpandCollapsePattern.</summary>
-    public ValueTask<UiResult<ActionReceipt>> SetExpandedAsync(
-        string sessionId,
-        string elementReference,
-        bool expand,
-        string clientId,
-        CancellationToken cancellationToken = default) =>
+    /// <param name="sessionId">Opaque session identifier.</param>
+    /// <param name="elementReference">Opaque UI element reference.</param>
+    /// <param name="expand">Whether to expand the element.</param>
+    /// <param name="clientId">Untrusted client identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Action receipt or a safe error.</returns>
+    public ValueTask<UiResult<ActionReceipt>> SetExpandedAsync(string sessionId, string elementReference, bool expand, string clientId, CancellationToken cancellationToken) =>
         ExecuteActionAsync(
             sessionId,
             elementReference,
@@ -288,12 +328,13 @@ public sealed class UiInspectService : IAsyncDisposable
             cancellationToken);
 
     /// <summary>Focus an element and send one allowlisted logical key.</summary>
-    public ValueTask<UiResult<ActionReceipt>> SendKeyAsync(
-        string sessionId,
-        string elementReference,
-        string key,
-        string clientId,
-        CancellationToken cancellationToken = default)
+    /// <param name="sessionId">Opaque session identifier.</param>
+    /// <param name="elementReference">Opaque UI element reference.</param>
+    /// <param name="key">Logical key.</param>
+    /// <param name="clientId">Untrusted client identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Action receipt or a safe error.</returns>
+    public ValueTask<UiResult<ActionReceipt>> SendKeyAsync(string sessionId, string elementReference, string key, string clientId, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         return ExecuteActionAsync(
@@ -307,20 +348,22 @@ public sealed class UiInspectService : IAsyncDisposable
     }
 
     /// <summary>Close and dispose an attached session.</summary>
-    public async ValueTask<UiResult<bool>> CloseSessionAsync(
-        string sessionId,
-        string clientId,
-        CancellationToken cancellationToken = default)
+    /// <param name="sessionId">Opaque session identifier.</param>
+    /// <param name="clientId">Untrusted client identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>True when the session was closed, otherwise a safe error.</returns>
+    public async ValueTask<UiResult<bool>> CloseSessionAsync(string sessionId, string clientId, CancellationToken cancellationToken)
     {
         var clientHash = GetClientHash(clientId);
-        if (!_sessions.TryGetValue(sessionId, out var entry) || entry.ClientHash != clientHash)
+        if (!_sessions.TryGetValue(sessionId, out var entry) || !AuditHash.Matches(entry.ClientHash, clientHash))
         {
-            return UiResult<bool>.Fail("session_not_found", "The session does not exist for this client.");
+            await AuditAsync("session_closed", DeniedOutcome, clientHash, null, "close_session", SessionNotFoundCode, cancellationToken).ConfigureAwait(false);
+            return UiResult<bool>.Fail(SessionNotFoundCode, "The session does not exist for this client.");
         }
 
         _ = _sessions.TryRemove(sessionId, out _);
         await entry.Session.DisposeAsync().ConfigureAwait(false);
-        await AuditAsync("session_closed", "completed", clientHash, entry.Session.Target, "close_session", null, cancellationToken);
+        await AuditAsync("session_closed", CompletedOutcome, clientHash, entry.Session.Target, "close_session", null, cancellationToken).ConfigureAwait(false);
         return UiResult<bool>.Ok(true);
     }
 
@@ -335,6 +378,13 @@ public sealed class UiInspectService : IAsyncDisposable
         }
     }
 
+    /// <summary>Hash a client identifier for secure comparison and storage.</summary>
+    /// <param name="clientId">Untrusted client identifier.</param>
+    /// <returns>Stable non-secret hash.</returns>
+    private static string GetClientHash(string clientId) => AuditHash.Compute(clientId);
+
+    /// <summary>Validates immutable server safety limits.</summary>
+    /// <param name="options">Options to validate.</param>
     private static void ValidateOptions(UiInspectOptions options)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.ConsentDuration, TimeSpan.Zero);
@@ -346,6 +396,21 @@ public sealed class UiInspectService : IAsyncDisposable
         ArgumentOutOfRangeException.ThrowIfLessThan(options.ConsentPromptRatePerMinute, 1);
     }
 
+    /// <summary>Converts a safe error's retry delay to a nullable time span.</summary>
+    /// <param name="error">Safe error value.</param>
+    /// <returns>Retry delay, when supplied.</returns>
+    private static TimeSpan? ToRetryAfter(UiError error) =>
+        error.RetryAfterMilliseconds is double milliseconds ? TimeSpan.FromMilliseconds(milliseconds) : null;
+
+    /// <summary>Executes a consent-gated semantic action.</summary>
+    /// <param name="sessionId">Opaque session identifier.</param>
+    /// <param name="elementReference">Opaque UI element reference.</param>
+    /// <param name="clientId">Untrusted client identifier.</param>
+    /// <param name="capability">Required consent capability.</param>
+    /// <param name="action">Action operation name.</param>
+    /// <param name="execute">Platform action delegate.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Action receipt or a safe error.</returns>
     private async ValueTask<UiResult<ActionReceipt>> ExecuteActionAsync(
         string sessionId,
         string elementReference,
@@ -356,38 +421,32 @@ public sealed class UiInspectService : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(elementReference);
-        var authorization = await AuthorizeSessionAsync(
-            sessionId,
-            clientId,
-            capability,
-            action,
-            _options.ActionRatePerMinute,
-            cancellationToken).ConfigureAwait(false);
+        var authorization = await AuthorizeSessionAsync(sessionId, clientId, capability, action, _options.ActionRatePerMinute, cancellationToken).ConfigureAwait(false);
         if (!authorization.Success)
         {
-            return UiResult<ActionReceipt>.Fail(
-                authorization.Error!.Code,
-                authorization.Error.Message,
-                authorization.Error.RetryAfterMilliseconds is double milliseconds
-                    ? TimeSpan.FromMilliseconds(milliseconds)
-                    : null);
+            return UiResult<ActionReceipt>.Fail(authorization.Error!.Code, authorization.Error.Message, ToRetryAfter(authorization.Error));
         }
 
         var entry = authorization.Data!;
         var result = await execute(entry.Session, elementReference, cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded)
         {
-            await AuditAsync("action", "failed", entry.ClientHash, entry.Session.Target, action, result.ErrorCode, cancellationToken);
-            return UiResult<ActionReceipt>.Fail(
-                result.ErrorCode ?? "automation_failed",
-                result.Message);
+            await AuditAsync("action", FailedOutcome, entry.ClientHash, entry.Session.Target, action, result.ErrorCode, cancellationToken).ConfigureAwait(false);
+            return UiResult<ActionReceipt>.Fail(result.ErrorCode ?? "automation_failed", result.Message);
         }
 
-        await AuditAsync("action", "completed", entry.ClientHash, entry.Session.Target, action, null, cancellationToken);
-        return UiResult<ActionReceipt>.Ok(
-            new ActionReceipt(action, elementReference, true, result.Message));
+        await AuditAsync("action", CompletedOutcome, entry.ClientHash, entry.Session.Target, action, null, cancellationToken).ConfigureAwait(false);
+        return UiResult<ActionReceipt>.Ok(new(action, elementReference, true, result.Message));
     }
 
+    /// <summary>Verifies session ownership, consent, target identity, and rate limits.</summary>
+    /// <param name="sessionId">Opaque session identifier.</param>
+    /// <param name="clientId">Untrusted client identifier.</param>
+    /// <param name="capability">Required consent capability.</param>
+    /// <param name="operation">Operation name.</param>
+    /// <param name="permits">Permitted operations per rate window.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Authorized entry or a safe error.</returns>
     private async ValueTask<UiResult<SessionEntry>> AuthorizeSessionAsync(
         string sessionId,
         string clientId,
@@ -398,9 +457,9 @@ public sealed class UiInspectService : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         var clientHash = GetClientHash(clientId);
-        if (!_sessions.TryGetValue(sessionId, out var entry) || entry.ClientHash != clientHash)
+        if (!_sessions.TryGetValue(sessionId, out var entry) || !AuditHash.Matches(entry.ClientHash, clientHash))
         {
-            return UiResult<SessionEntry>.Fail("session_not_found", "The session does not exist for this client.");
+            return UiResult<SessionEntry>.Fail(SessionNotFoundCode, "The session does not exist for this client.");
         }
 
         var current = await _processes.ResolveAsync(entry.Session.Target.ProcessId, cancellationToken).ConfigureAwait(false);
@@ -409,42 +468,51 @@ public sealed class UiInspectService : IAsyncDisposable
             _ = _sessions.TryRemove(sessionId, out _);
             _ = _consentRegistry.RevokeTarget(entry.Session.Target);
             await entry.Session.DisposeAsync().ConfigureAwait(false);
-            await AuditAsync("session", "failed", clientHash, entry.Session.Target, operation, "target_changed", cancellationToken);
-            return UiResult<SessionEntry>.Fail("target_changed", "The target process exited or changed.");
+            await AuditAsync(SessionOperation, FailedOutcome, clientHash, entry.Session.Target, operation, TargetChangedCode, cancellationToken).ConfigureAwait(false);
+            return UiResult<SessionEntry>.Fail(TargetChangedCode, "The target process exited or changed.");
         }
 
         var grant = _consentRegistry.FindActive(clientHash, current, capability);
         if (grant is null || grant.Id != entry.Grant.Id)
         {
+            _ = _sessions.TryRemove(sessionId, out _);
+            await entry.Session.DisposeAsync().ConfigureAwait(false);
+            await AuditAsync(SessionOperation, DeniedOutcome, clientHash, entry.Session.Target, operation, "consent_expired", cancellationToken).ConfigureAwait(false);
             return UiResult<SessionEntry>.Fail("consent_expired", "The required consent is absent, expired, or revoked.");
         }
 
-        var limited = CheckRate(
-            $"{operation}:{clientHash}:{current.ProcessId}:{current.StartedAtUtc.UtcTicks}",
-            permits);
-        return limited is null
-            ? UiResult<SessionEntry>.Ok(entry)
-            : UiResult<SessionEntry>.Fail("rate_limited", $"{operation} rate limit exceeded.", limited);
+        var limited = CheckRate($"{operation}:{clientHash}:{current.ProcessId}:{current.StartedAtUtc.UtcTicks}", permits);
+        if (limited is null)
+        {
+            return UiResult<SessionEntry>.Ok(entry);
+        }
+
+        await AuditAsync(SessionOperation, DeniedOutcome, clientHash, entry.Session.Target, operation, RateLimitedCode, cancellationToken).ConfigureAwait(false);
+        return UiResult<SessionEntry>.Fail(RateLimitedCode, $"{operation} rate limit exceeded.", limited);
     }
 
-    private static string GetClientHash(string clientId) => AuditHash.Compute(clientId);
-
+    /// <summary>Obtains a rate-limit retry delay when an operation cannot proceed.</summary>
+    /// <param name="bucket">Non-secret rate bucket.</param>
+    /// <param name="permits">Maximum permits per time window.</param>
+    /// <returns>Retry delay, or null when the operation is permitted.</returns>
     private TimeSpan? CheckRate(string bucket, int permits)
     {
         var decision = _rateLimiter.TryAcquire(bucket, permits, RateWindow);
         return decision.IsAllowed ? null : decision.RetryAfter;
     }
 
-    private ValueTask AuditAsync(
-        string eventType,
-        string outcome,
-        string clientHash,
-        ProcessIdentity? target,
-        string operation,
-        string? reason,
-        CancellationToken cancellationToken) =>
+    /// <summary>Writes a redacted audit event.</summary>
+    /// <param name="eventType">Audit event type.</param>
+    /// <param name="outcome">Audit outcome.</param>
+    /// <param name="clientHash">Hashed client identity.</param>
+    /// <param name="target">Optional target process.</param>
+    /// <param name="operation">Operation name.</param>
+    /// <param name="reason">Safe reason code.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Audit write completion.</returns>
+    private ValueTask AuditAsync(string eventType, string outcome, string clientHash, ProcessIdentity? target, string operation, string? reason, CancellationToken cancellationToken) =>
         _auditSink.WriteAsync(
-            new AuditEvent(
+            new(
                 _timeProvider.GetUtcNow(),
                 Guid.NewGuid().ToString("N"),
                 eventType,
@@ -456,8 +524,9 @@ public sealed class UiInspectService : IAsyncDisposable
                 reason),
             cancellationToken);
 
-    private sealed record SessionEntry(
-        string ClientHash,
-        ConsentGrant Grant,
-        IUiAutomationSession Session);
+    /// <summary>Associates a platform session with its owner and grant.</summary>
+    /// <param name="ClientHash">Hashed owner identity.</param>
+    /// <param name="Grant">Consent grant used to create the session.</param>
+    /// <param name="Session">Platform session.</param>
+    private sealed record SessionEntry(string ClientHash, ConsentGrant Grant, IUiAutomationSession Session);
 }

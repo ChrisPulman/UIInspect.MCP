@@ -1,5 +1,7 @@
-// Copyright (c) 2026 Chris Pulman.
-// Licensed under the MIT license.
+// Copyright (c) 2023-2026 Chris Pulman and Contributors. All rights reserved.
+// Chris Pulman and Contributors licenses this file to you under the MIT license.
+// See the LICENSE file in the project root for full license information.
+using System.Runtime.InteropServices;
 using UIInspect.MCP.Core.Abstractions;
 using UIInspect.MCP.Core.Models;
 
@@ -8,8 +10,13 @@ namespace UIInspect.MCP.Core.Security;
 /// <summary>A small in-memory fixed-window limiter suitable for one local stdio server.</summary>
 public sealed class FixedWindowRateLimiter : IOperationRateLimiter
 {
+    /// <summary>Timestamp queues grouped by non-secret rate bucket.</summary>
     private readonly Dictionary<string, Queue<DateTimeOffset>> _buckets = new(StringComparer.Ordinal);
-    private readonly object _gate = new();
+
+    /// <summary>Serializes access to the bucket dictionary and its queues.</summary>
+    private readonly Lock _gate = new();
+
+    /// <summary>Provides current UTC time.</summary>
     private readonly TimeProvider _timeProvider;
 
     /// <summary>Initializes a new instance of the <see cref="FixedWindowRateLimiter"/> class.</summary>
@@ -27,25 +34,26 @@ public sealed class FixedWindowRateLimiter : IOperationRateLimiter
         lock (_gate)
         {
             var now = _timeProvider.GetUtcNow();
-            if (!_buckets.TryGetValue(bucket, out var timestamps))
+            ref var timestamps = ref CollectionsMarshal.GetValueRefOrAddDefault(_buckets, bucket, out var exists);
+            if (!exists)
             {
-                timestamps = new Queue<DateTimeOffset>();
-                _buckets.Add(bucket, timestamps);
+                timestamps = [];
             }
 
-            while (timestamps.TryPeek(out var oldest) && now - oldest >= window)
+            var queue = timestamps!;
+            while (queue.TryPeek(out var oldest) && now - oldest >= window)
             {
-                _ = timestamps.Dequeue();
+                _ = queue.Dequeue();
             }
 
-            if (timestamps.Count >= permitLimit)
+            if (queue.Count >= permitLimit)
             {
-                var retryAfter = window - (now - timestamps.Peek());
-                return new RateLimitDecision(false, retryAfter);
+                var retryAfter = window - (now - queue.Peek());
+                return new(false, retryAfter);
             }
 
-            timestamps.Enqueue(now);
-            return new RateLimitDecision(true, TimeSpan.Zero);
+            queue.Enqueue(now);
+            return new(true, TimeSpan.Zero);
         }
     }
 }

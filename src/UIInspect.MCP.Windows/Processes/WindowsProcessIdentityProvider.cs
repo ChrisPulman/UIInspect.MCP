@@ -1,5 +1,6 @@
-// Copyright (c) 2026 Chris Pulman.
-// Licensed under the MIT license.
+// Copyright (c) 2023-2026 Chris Pulman and Contributors. All rights reserved.
+// Chris Pulman and Contributors licenses this file to you under the MIT license.
+// See the LICENSE file in the project root for full license information.
 using System.Diagnostics;
 using UIInspect.MCP.Core.Abstractions;
 using UIInspect.MCP.Core.Models;
@@ -9,14 +10,17 @@ namespace UIInspect.MCP.Windows.Processes;
 /// <summary>Resolves exact Windows process instances with PID-reuse protection.</summary>
 public sealed class WindowsProcessIdentityProvider : IProcessIdentityProvider
 {
+    /// <summary>Injectable process resolver used to isolate process access and test failure handling.</summary>
     private readonly Func<int, ProcessIdentity?> _resolve;
 
-    /// <summary>Initializes a resolver backed by the operating-system process table.</summary>
+    /// <summary>Initializes a new instance of the <see cref="WindowsProcessIdentityProvider"/> class.</summary>
     public WindowsProcessIdentityProvider()
         : this(ResolveProcess)
     {
     }
 
+    /// <summary>Initializes a new instance of the <see cref="WindowsProcessIdentityProvider"/> class with a process resolver.</summary>
+    /// <param name="resolve">Resolver that returns an exact process identity or throws an expected process-access exception.</param>
     internal WindowsProcessIdentityProvider(Func<int, ProcessIdentity?> resolve) =>
         _resolve = resolve ?? throw new ArgumentNullException(nameof(resolve));
 
@@ -49,6 +53,9 @@ public sealed class WindowsProcessIdentityProvider : IProcessIdentityProvider
         }
     }
 
+    /// <summary>Reads an executable path while normalizing access-denied and exited-process failures.</summary>
+    /// <param name="read">Process-module access operation.</param>
+    /// <returns>The executable path or an empty string when unavailable.</returns>
     internal static string ReadExecutablePath(Func<ProcessModule?> read)
     {
         try
@@ -65,10 +72,13 @@ public sealed class WindowsProcessIdentityProvider : IProcessIdentityProvider
         }
     }
 
+    /// <summary>Constructs a PID-reuse-resistant identity from the live Windows process.</summary>
+    /// <param name="processId">Windows process identifier.</param>
+    /// <returns>The resolved identity.</returns>
     private static ProcessIdentity ResolveProcess(int processId)
     {
         using var process = Process.GetProcessById(processId);
-        return new ProcessIdentity(
+        return new(
             process.Id,
             new DateTimeOffset(process.StartTime.ToUniversalTime()),
             process.ProcessName,

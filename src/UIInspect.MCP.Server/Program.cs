@@ -1,10 +1,11 @@
-// Copyright (c) 2026 Chris Pulman.
-// Licensed under the MIT license.
+// Copyright (c) 2023-2026 Chris Pulman and Contributors. All rights reserved.
+// Chris Pulman and Contributors licenses this file to you under the MIT license.
+// See the LICENSE file in the project root for full license information.
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
-using System.Diagnostics.CodeAnalysis;
 using UIInspect.MCP.Server.Tools;
 using UIInspect.MCP.Windows.DependencyInjection;
 
@@ -19,13 +20,13 @@ public static class Program
     public static IHost CreateHost(string[] args)
     {
         var builder = Host.CreateApplicationBuilder(args);
-        _ = builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
+        _ = builder.Logging.AddConsole(static options => options.LogToStandardErrorThreshold = LogLevel.Trace);
 
         var auditPath = Environment.GetEnvironmentVariable("UIINSPECT_AUDIT_PATH");
-        _ = builder.Services.AddWindowsUiInspect(auditPath: auditPath);
+        _ = builder.Services.AddWindowsUiInspect(null, auditPath);
         _ = builder.Services
             .AddMcpServer(
-                options => options.ServerInfo = new Implementation
+                static options => options.ServerInfo = new Implementation
                 {
                     Name = "uiinspect-mcp",
                     Version = typeof(Program).Assembly.GetName().Version!.ToString(),
@@ -41,5 +42,13 @@ public static class Program
     /// <param name="args">Command-line arguments.</param>
     /// <returns>Completion task.</returns>
     [ExcludeFromCodeCoverage(Justification = "The process entry point delegates entirely to the covered CreateHost composition root.")]
-    public static async Task Main(string[] args) => await CreateHost(args).RunAsync().ConfigureAwait(false);
+    public static async Task Main(string[] args)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("UIInspect.MCP requires Windows and an interactive desktop.");
+        }
+
+        await CreateHost(args).RunAsync().ConfigureAwait(false);
+    }
 }

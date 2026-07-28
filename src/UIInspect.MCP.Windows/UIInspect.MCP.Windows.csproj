@@ -1,18 +1,17 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>UIInspect.MCP.Windows</AssemblyName>
     <RootNamespace>UIInspect.MCP.Windows</RootNamespace>
-    <UseWindowsForms>true</UseWindowsForms>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssetTargetFallback>$(AssetTargetFallback);net8.0-windows7.0</AssetTargetFallback>
     <Description>FlaUI UIA3 adapter and trusted Windows consent prompt for UIInspect MCP.</Description>
   </PropertyGroup>
-
   <ItemGroup>
     <PackageReference Include="FlaUI.Core" />
     <PackageReference Include="FlaUI.UIA3" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
   </ItemGroup>
-
   <ItemGroup>
     <ProjectReference Include="..\UIInspect.MCP.Core\UIInspect.MCP.Core.csproj" />
   </ItemGroup>
