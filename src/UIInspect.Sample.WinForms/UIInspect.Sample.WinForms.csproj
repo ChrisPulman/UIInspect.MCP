@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>UIInspect.Sample.WinForms</AssemblyName>
+    <RootNamespace>UIInspect.Sample.WinForms</RootNamespace>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Description>Deterministic WinForms UI Automation fixture for UIInspect MCP.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+</Project>

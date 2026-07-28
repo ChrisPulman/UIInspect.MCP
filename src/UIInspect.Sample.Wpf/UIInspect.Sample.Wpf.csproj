@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>UIInspect.Sample.Wpf</AssemblyName>
+    <RootNamespace>UIInspect.Sample.Wpf</RootNamespace>
+    <UseWPF>true</UseWPF>
+    <Description>Deterministic WPF UI Automation fixture for UIInspect MCP.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+</Project>
