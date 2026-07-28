@@ -135,6 +135,7 @@ public sealed class ServerSurfaceTests
         var readme = await File.ReadAllTextAsync(Path.Combine(root, "README.md"));
         var skill = await File.ReadAllTextAsync(Path.Combine(root, "skills", "uiinspect", "SKILL.md"));
         var packages = await File.ReadAllTextAsync(Path.Combine(root, "Directory.Packages.props"));
+        var buildProperties = await File.ReadAllTextAsync(Path.Combine(root, "Directory.Build.props"));
 
         await Assert.That(registeredTools).IsEquivalentTo(expectedTools);
         foreach (var tool in expectedTools)
@@ -145,6 +146,11 @@ public sealed class ServerSurfaceTests
 
         await Assert.That(packages).Contains("ModelContextProtocol\" Version=\"1.4.1");
         await Assert.That(packages).Contains("FlaUI.UIA3\" Version=\"5.0.0");
+        await Assert.That(readme).Contains("images/ReadmeHero.png");
+        await Assert.That(buildProperties).Contains("<PackageIcon>IconNuget.png</PackageIcon>");
+        await Assert.That(File.Exists(Path.Combine(root, "images", "IconNuget.png"))).IsTrue();
+        await Assert.That(File.Exists(Path.Combine(root, "images", "GitHubLogo.png"))).IsTrue();
+        await Assert.That(File.Exists(Path.Combine(root, "images", "ReadmeHero.png"))).IsTrue();
     }
 
     private static string FindWorkspaceRoot()

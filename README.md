@@ -1,3 +1,5 @@
+![UIInspect.MCP semantic Windows UI Automation](images/ReadmeHero.png)
+
 # UIInspect.MCP
 
 UIInspect.MCP is a consent-gated C# Model Context Protocol server that gives AI agents semantic access to Windows applications through UI Automation 3 (UIA3). The MVP discovers and attaches to WPF, WinForms, WinUI, Avalonia, and .NET MAUI Windows application windows when those frameworks expose standard UIA providers. It returns a bounded control tree and performs deterministic actions against opaque element references instead of relying on pixel coordinates.

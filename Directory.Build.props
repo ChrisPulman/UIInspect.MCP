@@ -11,6 +11,7 @@
     <PackageProjectUrl>https://github.com/ChrisPulman/UIInspect.MCP</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ChrisPulman/UIInspect.MCP</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageIcon>IconNuget.png</PackageIcon>
     <RepositoryType>git</RepositoryType>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
@@ -29,6 +30,13 @@
     <PackageReference Include="PerformanceSharp.Analyzers" PrivateAssets="all" />
     <PackageReference Include="SecuritySharp.Analyzers" PrivateAssets="all" />
     <PackageReference Include="Nerdbank.GitVersioning" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)images\IconNuget.png"
+          Pack="true"
+          PackagePath="IconNuget.png"
+          Visible="false" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(IsTestProject)' == 'true'">
