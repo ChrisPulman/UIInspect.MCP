@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>UIInspect.MCP.Core</AssemblyName>
+    <RootNamespace>UIInspect.MCP.Core</RootNamespace>
+    <Description>Platform-neutral contracts, security policy, sessions, auditing, and orchestration for UIInspect MCP.</Description>
+  </PropertyGroup>
+</Project>
