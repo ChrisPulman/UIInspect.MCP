@@ -11,6 +11,8 @@
     <PackageVersion Include="ModelContextProtocol" Version="1.4.1" />
     <PackageVersion Include="Nerdbank.GitVersioning" Version="3.10.91" />
     <PackageVersion Include="TUnit" Version="1.61.0" />
-    <PackageVersion Include="StyleSharp.Analyzers" Version="3.28.1" />
+    <PackageVersion Include="StyleSharp.Analyzers" Version="3.40.0" />
+    <PackageVersion Include="PerformanceSharp.Analyzers" Version="3.40.0" />
+    <PackageVersion Include="SecuritySharp.Analyzers" Version="3.40.0" />
   </ItemGroup>
 </Project>
