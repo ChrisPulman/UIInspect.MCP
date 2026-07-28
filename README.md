@@ -1,5 +1,7 @@
 ![UIInspect.MCP semantic Windows UI Automation](images/ReadmeHero.png)
 
+<!-- mcp-name: io.github.chrispulman/uiinspect-mcp -->
+
 # UIInspect.MCP
 
 UIInspect.MCP is a consent-gated C# Model Context Protocol server that gives AI agents semantic access to Windows applications through UI Automation 3 (UIA3). The MVP discovers and attaches to WPF, WinForms, WinUI, Avalonia, and .NET MAUI Windows application windows when those frameworks expose standard UIA providers. It returns a bounded control tree and performs deterministic actions against opaque element references instead of relying on pixel coordinates.
@@ -17,7 +19,7 @@ Implemented:
 - Opaque, generation-scoped element references plus explanatory semantic paths.
 - Password-element redaction and no control-value collection during inspection.
 - Invoke, resolved click, ValuePattern set, SelectionItemPattern select, expand/collapse, and allowlisted logical keys.
-- Per-client/process consent, expiry, PID-reuse checks, rate limits, append-only redacted JSONL audit, and deterministic session cleanup.
+- Per-connected-stdio-client/process consent, expiry, PID-reuse checks, rate limits, append-only redacted JSONL audit, and deterministic session cleanup.
 - Deterministic WPF and WinForms fixture applications.
 - TUnit/MTP unit and live Windows integration tests.
 
@@ -58,6 +60,8 @@ Projects:
 | `UIInspect.Sample.WinForms` | Deterministic WinForms UIA fixture |
 | `UIInspect.MCP.Tests` | TUnit/MTP unit, host, and live UIA integration tests |
 
+The distributable tool assemblies target `net10.0` so they can be packaged as a .NET tool. They are explicitly annotated as Windows-only with `SupportedOSPlatform("windows")`; the WPF and WinForms fixtures retain Windows-specific target frameworks.
+
 ## Build and test
 
 Requirements:
@@ -67,8 +71,7 @@ Requirements:
 - The server must run in the same Windows logon session and at a sufficient integrity level for its target.
 
 ```powershell
-dotnet restore .\UIInspect.MCP.slnx
-dotnet build .\UIInspect.MCP.slnx -c Release --no-restore
+.\build.cmd Compile --configuration Release
 dotnet test .\src\UIInspect.MCP.Tests\UIInspect.MCP.Tests.csproj -c Release --no-build --no-restore -- `
   --coverage `
   --coverage-settings .\eng\coverage.runsettings `
@@ -78,7 +81,11 @@ dotnet test .\src\UIInspect.MCP.Tests\UIInspect.MCP.Tests.csproj -c Release --no
   --no-progress
 ```
 
+The NUKE `ResolveVersion` target asks the server project's MinVer target for both `MinVerVersion` and `PackageVersion`. `SynchronizeVersion` then updates `.mcp/server.json` and the `dnx` installation command before compilation, while preserving the full MinVer value as `MinVerVersionOverride` for every child build. Run `.\build.cmd Pack --configuration Release` to apply the same pipeline and emit the tool package under `packages`.
+
 The coverage allowlist includes the three production assemblies and excludes only test assemblies, fixture applications, compiler-generated sources, and methods with a reviewed `ExcludeFromCodeCoverage` justification. The gate is 100% of eligible production code; inspect the Cobertura report for exact line and branch metrics.
+
+FlaUI 5.0 currently labels its modern package assets `net8.0-windows7.0`. The two distributable `net10.0` projects use `AssetTargetFallback` to select those assets, so NuGet reports `NU1701` until FlaUI publishes a compatible neutral or .NET 10 asset. The live WPF/WinForms UIA suite is the runtime compatibility gate; no warning is suppressed.
 
 ## Run
 
@@ -89,6 +96,12 @@ dotnet run --project .\src\UIInspect.MCP.Server\UIInspect.MCP.Server.csproj -c R
 ```
 
 The MCP protocol owns stdout. All console logging goes to stderr.
+
+Install the packaged MCP server:
+
+```powershell
+dnx UIInspect.MCP.Server@0.1.0-alpha.0 --yes
+```
 
 Example local MCP client configuration:
 
@@ -110,7 +123,7 @@ Example local MCP client configuration:
 }
 ```
 
-The same stdio command can be used by Codex, VS Code, Visual Studio 2022/2026 MCP-capable agent integrations, and other MCP clients. Adjust only the client-specific configuration container.
+The same stdio command can be used by Codex, VS Code, Visual Studio 2022/2026 MCP-capable agent integrations, and other MCP clients. Adjust only the client-specific configuration container. Tool parameters never accept a caller-supplied client identity: the one connected stdio transport is the authorization boundary for the server process.
 
 Set `UIINSPECT_AUDIT_PATH` to override the default audit location at `%LOCALAPPDATA%\UIInspect.MCP\audit\actions.jsonl`.
 

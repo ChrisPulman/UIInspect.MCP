@@ -1,5 +1,6 @@
-// Copyright (c) 2026 Chris Pulman.
-// Licensed under the MIT license.
+// Copyright (c) 2023-2026 Chris Pulman and Contributors. All rights reserved.
+// Chris Pulman and Contributors licenses this file to you under the MIT license.
+// See the LICENSE file in the project root for full license information.
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 using FlaUI.UIA3;
@@ -11,6 +12,10 @@ namespace UIInspect.MCP.Windows.Automation;
 /// <summary>FlaUI UIA3 discovery and attachment boundary.</summary>
 public sealed class FlaUiAutomationBackend : IUiAutomationBackend
 {
+    /// <summary>Bounded timeout used for UIA provider connection and transactions.</summary>
+    private const int AutomationTimeoutSeconds = 5;
+
+    /// <summary>Resolves process identities for discoverable UIA windows.</summary>
     private readonly IProcessIdentityProvider _processes;
 
     /// <summary>Initializes a new instance of the <see cref="FlaUiAutomationBackend"/> class.</summary>
@@ -40,7 +45,7 @@ public sealed class FlaUiAutomationBackend : IUiAutomationBackend
             }
 
             windows.Add(
-                new WindowDescriptor(
+                new(
                     identity!,
                     handle,
                     UiaOperationGuard.ReadString(() => element.Name),
@@ -80,38 +85,17 @@ public sealed class FlaUiAutomationBackend : IUiAutomationBackend
         }
     }
 
-    private static UIA3Automation CreateAutomation() =>
-        new()
-        {
-            ConnectionTimeout = TimeSpan.FromSeconds(5),
-            TransactionTimeout = TimeSpan.FromSeconds(5),
-        };
-
-    private static AutomationElement FindRoot(
-        UIA3Automation automation,
-        int processId,
-        long? windowHandle)
-    {
-        if (windowHandle is long requestedHandle)
-        {
-            if (requestedHandle == 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(windowHandle));
-            }
-
-            return automation.FromHandle(new IntPtr(requestedHandle));
-        }
-
-        return automation.GetDesktop()
-                   .FindFirstChild(
-                       condition => condition.ByControlType(ControlType.Window)
-                           .And(condition.ByProcessId(processId)))
-               ?? throw new InvalidOperationException("No top-level UI Automation window was found for the target process.");
-    }
-
+    /// <summary>Determines whether a window has a resolvable process identity and native handle.</summary>
+    /// <param name="identity">Resolved process identity.</param>
+    /// <param name="handle">Native window handle.</param>
+    /// <returns><see langword="true"/> when the window is safe to expose for consent.</returns>
     internal static bool IsDiscoverable(ProcessIdentity? identity, long handle) =>
         identity is not null && handle != 0;
 
+    /// <summary>Verifies that the resolved root belongs to the consented target and has a native handle.</summary>
+    /// <param name="actualProcessId">Process ID reported by the UIA root.</param>
+    /// <param name="expectedProcessId">Process ID covered by consent.</param>
+    /// <param name="handle">Native handle reported by the UIA root.</param>
     internal static void ValidateAttachedWindow(
         int actualProcessId,
         int expectedProcessId,
@@ -126,5 +110,37 @@ public sealed class FlaUiAutomationBackend : IUiAutomationBackend
         {
             throw new InvalidOperationException("The selected UI Automation root has no native window handle.");
         }
+    }
+
+    /// <summary>Creates a UIA3 client with bounded provider timeouts.</summary>
+    /// <returns>A configured UIA3 client.</returns>
+    private static UIA3Automation CreateAutomation() =>
+        new() { ConnectionTimeout = TimeSpan.FromSeconds(AutomationTimeoutSeconds), TransactionTimeout = TimeSpan.FromSeconds(AutomationTimeoutSeconds), };
+
+    /// <summary>Finds the requested or first top-level UIA root for a consented process.</summary>
+    /// <param name="automation">UIA3 client.</param>
+    /// <param name="processId">Consented process ID.</param>
+    /// <param name="windowHandle">Optional explicitly selected handle.</param>
+    /// <returns>The UIA root.</returns>
+    private static AutomationElement FindRoot(
+        UIA3Automation automation,
+        int processId,
+        long? windowHandle)
+    {
+        if (windowHandle is long requestedHandle)
+        {
+            if (requestedHandle == 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(windowHandle));
+            }
+
+            return automation.FromHandle(new(requestedHandle));
+        }
+
+        return automation.GetDesktop()
+                   .FindFirstChild(
+                       condition => condition.ByControlType(ControlType.Window)
+                           .And(condition.ByProcessId(processId)))
+               ?? throw new InvalidOperationException("No top-level UI Automation window was found for the target process.");
     }
 }

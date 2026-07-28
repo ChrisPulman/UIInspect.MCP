@@ -1,5 +1,6 @@
-// Copyright (c) 2026 Chris Pulman.
-// Licensed under the MIT license.
+// Copyright (c) 2023-2026 Chris Pulman and Contributors. All rights reserved.
+// Chris Pulman and Contributors licenses this file to you under the MIT license.
+// See the LICENSE file in the project root for full license information.
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Input;
 using FlaUI.Core.WindowsAPI;
@@ -12,6 +13,16 @@ namespace UIInspect.MCP.Windows.Automation;
 /// <summary>Serialized, locator-based UIA3 session that never exposes live COM elements.</summary>
 public sealed class FlaUiAutomationSession : IUiAutomationSession
 {
+    /// <summary>Error code returned when an element does not expose the required UIA pattern.</summary>
+    private const string PatternNotSupportedCode = "pattern_not_supported";
+
+    /// <summary>Initial capacity for a bounded tree snapshot.</summary>
+    private const int SnapshotInitialCapacity = 256;
+
+    /// <summary>Expected number of common UIA patterns on a single element.</summary>
+    private const int SupportedPatternCapacity = 6;
+
+    /// <summary>Logical keyboard keys that are safe and deterministic to send through UIA.</summary>
     private static readonly IReadOnlyDictionary<string, VirtualKeyShort> AllowedKeys =
         new Dictionary<string, VirtualKeyShort>(StringComparer.OrdinalIgnoreCase)
         {
@@ -31,10 +42,19 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
             ["UP"] = VirtualKeyShort.UP,
         };
 
+    /// <summary>Owned UIA3 client used for the lifetime of this session.</summary>
     private readonly UIA3Automation _automation;
+
+    /// <summary>Serializes UIA calls because UIA providers are not reliably concurrent.</summary>
     private readonly SemaphoreSlim _gate = new(1, 1);
+
+    /// <summary>Session-scoped opaque element references and their semantic locators.</summary>
     private readonly Dictionary<string, ElementLocator> _locators = new(StringComparer.Ordinal);
+
+    /// <summary>Whether the owned automation client has been disposed.</summary>
     private bool _disposed;
+
+    /// <summary>Monotonically increasing generation used to invalidate stale references.</summary>
     private long _generation;
 
     /// <summary>Initializes a new instance of the <see cref="FlaUiAutomationSession"/> class.</summary>
@@ -76,9 +96,9 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
             var root = GetRoot();
             _locators.Clear();
             var generation = ++_generation;
-            var nodes = new List<UiElementNode>(Math.Min(maxNodes, 256));
+            var nodes = new List<UiElementNode>(Math.Min(maxNodes, SnapshotInitialCapacity));
             var pending = new Queue<PendingElement>();
-            pending.Enqueue(new PendingElement(root, null, [], 0));
+            pending.Enqueue(new(root, null, [], 0));
             var truncated = false;
 
             while (pending.TryDequeue(out var current))
@@ -110,12 +130,12 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
                 for (var index = 0; index < children.Length; index++)
                 {
                     var selector = CreateSelector(children, index);
-                    var childSegments = current.Segments.Append(selector).ToArray();
-                    pending.Enqueue(new PendingElement(children[index], reference, childSegments, current.Depth + 1));
+                    var childSegments = AppendSegment(current.Segments, selector);
+                    pending.Enqueue(new(children[index], reference, childSegments, current.Depth + 1));
                 }
             }
 
-            return new UiTreeSnapshot(sessionId, generation, nodes, truncated);
+            return new(sessionId, generation, nodes, truncated);
         }
         finally
         {
@@ -134,7 +154,7 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
                 var pattern = element.Patterns.Invoke.PatternOrDefault;
                 if (pattern is null)
                 {
-                    return PlatformActionResult.Fail("pattern_not_supported", "The element does not support InvokePattern.");
+                    return PlatformActionResult.Fail(PatternNotSupportedCode, "The element does not support InvokePattern.");
                 }
 
                 pattern.Invoke();
@@ -150,7 +170,7 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
             elementReference,
             static element =>
             {
-                element.Click(false);
+                element.Click();
                 return PlatformActionResult.Ok("The resolved element was clicked.");
             },
             cancellationToken);
@@ -169,10 +189,10 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
                 var pattern = element.Patterns.Value.PatternOrDefault;
                 if (pattern is null)
                 {
-                    return PlatformActionResult.Fail("pattern_not_supported", "The element does not support ValuePattern.");
+                    return PlatformActionResult.Fail(PatternNotSupportedCode, "The element does not support ValuePattern.");
                 }
 
-                if (pattern.IsReadOnly.Value)
+                if (UiaOperationGuard.Read(() => pattern.IsReadOnly.Value, true))
                 {
                     return PlatformActionResult.Fail("read_only", "The element value is read-only.");
                 }
@@ -194,7 +214,7 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
                 var pattern = element.Patterns.SelectionItem.PatternOrDefault;
                 if (pattern is null)
                 {
-                    return PlatformActionResult.Fail("pattern_not_supported", "The element does not support SelectionItemPattern.");
+                    return PlatformActionResult.Fail(PatternNotSupportedCode, "The element does not support SelectionItemPattern.");
                 }
 
                 pattern.Select();
@@ -214,7 +234,7 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
                 var pattern = element.Patterns.ExpandCollapse.PatternOrDefault;
                 if (pattern is null)
                 {
-                    return PlatformActionResult.Fail("pattern_not_supported", "The element does not support ExpandCollapsePattern.");
+                    return PlatformActionResult.Fail(PatternNotSupportedCode, "The element does not support ExpandCollapsePattern.");
                 }
 
                 if (expand)
@@ -232,17 +252,11 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
     public ValueTask<PlatformActionResult> SendKeyAsync(
         string elementReference,
         string key,
-        CancellationToken cancellationToken)
-    {
-        if (!AllowedKeys.TryGetValue(key, out var virtualKey))
-        {
-            return ValueTask.FromResult(
+        CancellationToken cancellationToken) =>
+        !AllowedKeys.TryGetValue(key, out var virtualKey) ? ValueTask.FromResult(
                 PlatformActionResult.Fail(
                     "key_not_allowed",
-                    $"Unsupported logical key. Allowed keys: {string.Join(", ", AllowedKeys.Keys)}."));
-        }
-
-        return ExecuteAsync(
+                    $"Unsupported logical key. Allowed keys: {string.Join(", ", AllowedKeys.Keys)}.")) : ExecuteAsync(
             elementReference,
             element =>
             {
@@ -251,7 +265,6 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
                 return PlatformActionResult.Ok($"Logical key {key.ToUpperInvariant()} was sent.");
             },
             cancellationToken);
-    }
 
     /// <inheritdoc/>
     public ValueTask DisposeAsync()
@@ -268,6 +281,13 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
         return ValueTask.CompletedTask;
     }
 
+    /// <summary>Creates a safe, serializable snapshot node for a UIA element.</summary>
+    /// <param name="element">UIA element to inspect.</param>
+    /// <param name="reference">Opaque session reference.</param>
+    /// <param name="parentReference">Opaque parent reference.</param>
+    /// <param name="segments">Semantic path segments.</param>
+    /// <param name="depth">Depth from the attached window root.</param>
+    /// <returns>The serializable node.</returns>
     private static UiElementNode CreateNode(
         AutomationElement element,
         string reference,
@@ -277,10 +297,22 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
     {
         var isPassword = UiaOperationGuard.Read(() => element.Properties.IsPassword.ValueOrDefault, false);
         var rectangle = UiaOperationGuard.Read(() => element.BoundingRectangle, System.Drawing.Rectangle.Empty);
-        return new UiElementNode(
+        var stablePath = "$window";
+        if (segments.Count > 0)
+        {
+            var displays = new string[segments.Count];
+            for (var index = 0; index < segments.Count; index++)
+            {
+                displays[index] = segments[index].Display;
+            }
+
+            stablePath = $"$window/{string.Join("/", displays)}";
+        }
+
+        return new(
             reference,
             parentReference,
-            segments.Count == 0 ? "$window" : "$window/" + string.Join("/", segments.Select(static segment => segment.Display)),
+            stablePath,
             depth,
             UiaOperationGuard.Read(() => element.ControlType.ToString(), "Unknown"),
             isPassword ? "[redacted]" : UiaOperationGuard.ReadString(() => element.Name),
@@ -294,18 +326,25 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
             GetSupportedPatterns(element));
     }
 
+    /// <summary>Lists common UIA patterns reported as supported by an element.</summary>
+    /// <param name="element">Element to inspect.</param>
+    /// <returns>Supported pattern names.</returns>
     private static List<string> GetSupportedPatterns(AutomationElement element)
     {
-        var patterns = new List<string>(6);
+        var patterns = new List<string>(SupportedPatternCapacity);
         AddIfSupported(patterns, "ExpandCollapse", () => element.Patterns.ExpandCollapse.IsSupported);
         AddIfSupported(patterns, "Invoke", () => element.Patterns.Invoke.IsSupported);
         AddIfSupported(patterns, "SelectionItem", () => element.Patterns.SelectionItem.IsSupported);
         AddIfSupported(patterns, "Toggle", () => element.Patterns.Toggle.IsSupported);
         AddIfSupported(patterns, "Value", () => element.Patterns.Value.IsSupported);
-        AddIfSupported(patterns, "Window", () => element.Patterns.Window.IsSupported);
+        AddIfSupported(patterns, nameof(Window), () => element.Patterns.Window.IsSupported);
         return patterns;
     }
 
+    /// <summary>Adds a pattern name when a provider reports that pattern as supported.</summary>
+    /// <param name="patterns">Target pattern list.</param>
+    /// <param name="name">Pattern name.</param>
+    /// <param name="isSupported">Deferred provider capability check.</param>
     private static void AddIfSupported(List<string> patterns, string name, Func<bool> isSupported)
     {
         if (UiaOperationGuard.Read(isSupported, false))
@@ -314,12 +353,21 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
         }
     }
 
+    /// <summary>Creates a selector for one sibling using a stable ordinal among semantic matches.</summary>
+    /// <param name="siblings">Sibling UIA elements.</param>
+    /// <param name="index">Selected sibling index.</param>
+    /// <returns>The selector for the selected sibling.</returns>
     private static ElementSelector CreateSelector(AutomationElement[] siblings, int index)
     {
-        var identities = siblings.Select(ReadIdentity).ToArray();
+        var identities = new ElementIdentity[siblings.Length];
+        for (var siblingIndex = 0; siblingIndex < siblings.Length; siblingIndex++)
+        {
+            identities[siblingIndex] = ReadIdentity(siblings[siblingIndex]);
+        }
+
         var identity = identities[index];
         var ordinal = ElementMatching.CountPriorMatches(identities, index, identity);
-        return new ElementSelector(
+        return new(
             identity.ControlType,
             identity.AutomationId,
             identity.Name,
@@ -327,6 +375,25 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
             ordinal);
     }
 
+    /// <summary>Appends a semantic selector without allocating through LINQ.</summary>
+    /// <param name="segments">Existing path segments.</param>
+    /// <param name="selector">Selector to append.</param>
+    /// <returns>A new path including <paramref name="selector"/>.</returns>
+    private static ElementSelector[] AppendSegment(IReadOnlyList<ElementSelector> segments, ElementSelector selector)
+    {
+        var appended = new ElementSelector[segments.Count + 1];
+        for (var index = 0; index < segments.Count; index++)
+        {
+            appended[index] = segments[index];
+        }
+
+        appended[^1] = selector;
+        return appended;
+    }
+
+    /// <summary>Reads provider-neutral identity values from a UIA element.</summary>
+    /// <param name="element">Element to inspect.</param>
+    /// <returns>The semantic identity.</returns>
     private static ElementIdentity ReadIdentity(AutomationElement element) =>
         new(
             UiaOperationGuard.Read(() => element.ControlType.ToString(), "Unknown"),
@@ -334,15 +401,24 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
             UiaOperationGuard.ReadString(() => element.Name),
             UiaOperationGuard.ReadString(() => element.ClassName));
 
+    /// <summary>Determines whether a UIA element matches a semantic selector.</summary>
+    /// <param name="element">Candidate UIA element.</param>
+    /// <param name="selector">Expected semantic selector.</param>
+    /// <returns><see langword="true"/> when the candidate matches.</returns>
     private static bool Matches(AutomationElement element, ElementSelector selector) =>
         ElementMatching.Matches(
             ReadIdentity(element),
-            new ElementIdentity(
+            new(
                 selector.ControlType,
                 selector.AutomationId,
                 selector.Name,
                 selector.ClassName));
 
+    /// <summary>Resolves an opaque reference and executes a serialized UIA action.</summary>
+    /// <param name="elementReference">Opaque element reference from the latest inspection.</param>
+    /// <param name="execute">Action applied to the resolved element.</param>
+    /// <param name="cancellationToken">Operation cancellation token.</param>
+    /// <returns>The deterministic action result.</returns>
     private async ValueTask<PlatformActionResult> ExecuteAsync(
         string elementReference,
         Func<AutomationElement, PlatformActionResult> execute,
@@ -384,15 +460,25 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
         }
     }
 
+    /// <summary>Re-resolves an opaque locator against the current UIA tree.</summary>
+    /// <param name="locator">Session-scoped semantic locator.</param>
+    /// <returns>The matching UIA element or <see langword="null"/> when stale.</returns>
     private AutomationElement? Resolve(ElementLocator locator)
     {
         var current = GetRoot();
         foreach (var selector in locator.Segments)
         {
-            var matches = current.FindAllChildren()
-                .Where(element => Matches(element, selector))
-                .ToArray();
-            if (selector.Ordinal >= matches.Length)
+            var matches = new List<AutomationElement>();
+            var children = current.FindAllChildren();
+            foreach (var child in children)
+            {
+                if (Matches(child, selector))
+                {
+                    matches.Add(child);
+                }
+            }
+
+            if (selector.Ordinal >= matches.Count)
             {
                 return null;
             }
@@ -403,9 +489,11 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
         return current;
     }
 
+    /// <summary>Gets the attached window root and verifies its process ownership.</summary>
+    /// <returns>The current attached window root.</returns>
     private AutomationElement GetRoot()
     {
-        var root = _automation.FromHandle(new IntPtr(WindowHandle));
+        var root = _automation.FromHandle(new(WindowHandle));
         if (root.Properties.ProcessId.Value != Target.ProcessId)
         {
             throw new InvalidOperationException("The attached window handle no longer belongs to the consented process.");
@@ -414,6 +502,11 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
         return root;
     }
 
+    /// <summary>Queued tree element together with the data needed to produce a snapshot node.</summary>
+    /// <param name="Element">UIA element to inspect.</param>
+    /// <param name="ParentReference">Opaque parent reference.</param>
+    /// <param name="Segments">Semantic path segments.</param>
+    /// <param name="Depth">Depth from the attached root.</param>
     private sealed record PendingElement(
         AutomationElement Element,
         string? ParentReference,

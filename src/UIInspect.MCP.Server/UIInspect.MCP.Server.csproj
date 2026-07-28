@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <OutputType>Exe</OutputType>
     <AssemblyName>UIInspect.MCP.Server</AssemblyName>
     <RootNamespace>UIInspect.MCP.Server</RootNamespace>
@@ -11,6 +11,8 @@
     <PackAsTool>true</PackAsTool>
     <PackageType>McpServer</PackageType>
     <ToolCommandName>uiinspect-mcp</ToolCommandName>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <AssetTargetFallback>$(AssetTargetFallback);net8.0-windows7.0</AssetTargetFallback>
   </PropertyGroup>
 
   <ItemGroup>
@@ -27,5 +29,9 @@
     <None Include="..\..\README.md" Pack="true" PackagePath="" Link="README.md" />
     <None Include="..\..\.mcp\server.json" Pack="true" PackagePath=".mcp\" Link=".mcp\server.json" />
     <None Include="..\..\skills\uiinspect\SKILL.md" Pack="true" PackagePath="skills\uiinspect\" Link="skills\uiinspect\SKILL.md" />
+    <None Include="..\..\images\GitHubLogo.png" Pack="true" PackagePath="images\" Link="images\GitHubLogo.png" />
+    <None Include="..\..\images\ReadmeHero.png" Pack="true" PackagePath="images\" Link="images\ReadmeHero.png" />
+    <None Include="..\..\docs\mvp-design.md" Pack="true" PackagePath="docs\" Link="docs\mvp-design.md" />
+    <None Include="..\..\docs\security.md" Pack="true" PackagePath="docs\" Link="docs\security.md" />
   </ItemGroup>
 </Project>

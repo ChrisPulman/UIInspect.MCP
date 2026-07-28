@@ -15,6 +15,10 @@
     <RepositoryType>git</RepositoryType>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerMinimumMajorMinor>0.1</MinVerMinimumMajorMinor>
+    <MinVerAutoIncrement>patch</MinVerAutoIncrement>
+    <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(IsTestProject)' == 'true'">
@@ -29,7 +33,7 @@
     <PackageReference Include="StyleSharp.Analyzers" PrivateAssets="all" />
     <PackageReference Include="PerformanceSharp.Analyzers" PrivateAssets="all" />
     <PackageReference Include="SecuritySharp.Analyzers" PrivateAssets="all" />
-    <PackageReference Include="Nerdbank.GitVersioning" PrivateAssets="all" />
+    <PackageReference Include="MinVer" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>

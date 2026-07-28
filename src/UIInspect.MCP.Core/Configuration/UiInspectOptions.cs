@@ -1,12 +1,16 @@
-// Copyright (c) 2026 Chris Pulman.
-// Licensed under the MIT license.
+// Copyright (c) 2023-2026 Chris Pulman and Contributors. All rights reserved.
+// Chris Pulman and Contributors licenses this file to you under the MIT license.
+// See the LICENSE file in the project root for full license information.
 namespace UIInspect.MCP.Core.Configuration;
 
 /// <summary>MVP safety and response bounds.</summary>
 public sealed class UiInspectOptions
 {
+    /// <summary>Default short-lived consent duration in minutes.</summary>
+    private const double DefaultConsentDurationMinutes = 15;
+
     /// <summary>Gets or sets the short-lived consent duration.</summary>
-    public TimeSpan ConsentDuration { get; set; } = TimeSpan.FromMinutes(15);
+    public TimeSpan ConsentDuration { get; set; } = TimeSpan.FromMinutes(DefaultConsentDurationMinutes);
 
     /// <summary>Gets or sets the maximum accepted inspection depth.</summary>
     public int MaximumTreeDepth { get; set; } = 12;

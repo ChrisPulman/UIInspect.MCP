@@ -1,5 +1,6 @@
-// Copyright (c) 2026 Chris Pulman.
-// Licensed under the MIT license.
+// Copyright (c) 2023-2026 Chris Pulman and Contributors. All rights reserved.
+// Chris Pulman and Contributors licenses this file to you under the MIT license.
+// See the LICENSE file in the project root for full license information.
 using System.Collections.Concurrent;
 using UIInspect.MCP.Core.Models;
 
@@ -8,7 +9,10 @@ namespace UIInspect.MCP.Core.Security;
 /// <summary>Stores short-lived consent grants for exact process instances.</summary>
 public sealed class ConsentRegistry
 {
+    /// <summary>Active grants keyed by their opaque identifiers.</summary>
     private readonly ConcurrentDictionary<Guid, ConsentGrant> _grants = new();
+
+    /// <summary>Provides current UTC time.</summary>
     private readonly TimeProvider _timeProvider;
 
     /// <summary>Initializes a new instance of the <see cref="ConsentRegistry"/> class.</summary>
@@ -64,9 +68,9 @@ public sealed class ConsentRegistry
                 continue;
             }
 
-            if (grant.ClientHash == clientHash &&
-                grant.Target == target &&
-                grant.Capabilities.HasFlag(requiredCapability))
+            if (AuditHash.Matches(grant.ClientHash, clientHash)
+                && grant.Target == target
+                && (grant.Capabilities & requiredCapability) == requiredCapability)
             {
                 return grant;
             }
@@ -86,9 +90,9 @@ public sealed class ConsentRegistry
     public int RevokeTarget(ProcessIdentity target)
     {
         var removed = 0;
-        foreach (var pair in _grants.Where(pair => pair.Value.Target == target))
+        foreach (var pair in _grants)
         {
-            if (_grants.TryRemove(pair.Key, out _))
+            if (pair.Value.Target == target && _grants.TryRemove(pair.Key, out _))
             {
                 removed++;
             }
