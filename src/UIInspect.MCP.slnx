@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/Config/">
     <File Path="../.editorconfig" />
+    <File Path="../.gitattributes" />
     <File Path="../.gitignore" />
     <File Path="../.mcp/server.json" />
     <File Path="../Directory.Build.props" />
@@ -16,9 +17,9 @@
     <Project Path="../build/_build.csproj" />
   </Folder>
   <Project Path="UIInspect.MCP.Core/UIInspect.MCP.Core.csproj" />
-  <Project Path="UIInspect.MCP.Windows/UIInspect.MCP.Windows.csproj" />
   <Project Path="UIInspect.MCP.Server/UIInspect.MCP.Server.csproj" />
-  <Project Path="UIInspect.Sample.Wpf/UIInspect.Sample.Wpf.csproj" />
-  <Project Path="UIInspect.Sample.WinForms/UIInspect.Sample.WinForms.csproj" />
   <Project Path="UIInspect.MCP.Tests/UIInspect.MCP.Tests.csproj" />
+  <Project Path="UIInspect.MCP.Windows/UIInspect.MCP.Windows.csproj" />
+  <Project Path="UIInspect.Sample.WinForms/UIInspect.Sample.WinForms.csproj" />
+  <Project Path="UIInspect.Sample.Wpf/UIInspect.Sample.Wpf.csproj" />
 </Solution>
