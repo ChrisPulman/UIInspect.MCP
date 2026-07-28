@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>UIInspect.MCP.Server</AssemblyName>
+    <RootNamespace>UIInspect.MCP.Server</RootNamespace>
+    <PackageId>UIInspect.MCP.Server</PackageId>
+    <Title>UIInspect MCP Server</Title>
+    <Description>Consent-gated semantic Windows UI Automation MCP server using UIA3 and FlaUI.</Description>
+    <PackageTags>MCP;Model Context Protocol;UI Automation;UIA3;FlaUI;WPF;WinUI;WinForms;Avalonia;MAUI</PackageTags>
+    <PackAsTool>true</PackAsTool>
+    <PackageType>McpServer</PackageType>
+    <ToolCommandName>uiinspect-mcp</ToolCommandName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="ModelContextProtocol" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\UIInspect.MCP.Core\UIInspect.MCP.Core.csproj" />
+    <ProjectReference Include="..\UIInspect.MCP.Windows\UIInspect.MCP.Windows.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="" Link="README.md" />
+    <None Include="..\..\.mcp\server.json" Pack="true" PackagePath=".mcp\" Link=".mcp\server.json" />
+    <None Include="..\..\skills\uiinspect\SKILL.md" Pack="true" PackagePath="skills\uiinspect\" Link="skills\uiinspect\SKILL.md" />
+  </ItemGroup>
+</Project>

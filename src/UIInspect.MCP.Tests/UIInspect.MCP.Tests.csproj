@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <AssemblyName>UIInspect.MCP.Tests</AssemblyName>
+    <RootNamespace>UIInspect.MCP.Tests</RootNamespace>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TUnit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\UIInspect.MCP.Core\UIInspect.MCP.Core.csproj" />
+    <ProjectReference Include="..\UIInspect.MCP.Windows\UIInspect.MCP.Windows.csproj" />
+    <ProjectReference Include="..\UIInspect.MCP.Server\UIInspect.MCP.Server.csproj" />
+    <ProjectReference Include="..\UIInspect.Sample.Wpf\UIInspect.Sample.Wpf.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\UIInspect.Sample.WinForms\UIInspect.Sample.WinForms.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+</Project>
