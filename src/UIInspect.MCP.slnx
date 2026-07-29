@@ -20,6 +20,9 @@
   <Project Path="UIInspect.MCP.Server/UIInspect.MCP.Server.csproj" />
   <Project Path="UIInspect.MCP.Tests/UIInspect.MCP.Tests.csproj" />
   <Project Path="UIInspect.MCP.Windows/UIInspect.MCP.Windows.csproj" />
+  <Project Path="UIInspect.Sample.Avalonia/UIInspect.Sample.Avalonia.csproj" />
+  <Project Path="UIInspect.Sample.Maui/UIInspect.Sample.Maui.csproj" />
   <Project Path="UIInspect.Sample.WinForms/UIInspect.Sample.WinForms.csproj" />
+  <Project Path="UIInspect.Sample.WinUI/UIInspect.Sample.WinUI.csproj" />
   <Project Path="UIInspect.Sample.Wpf/UIInspect.Sample.Wpf.csproj" />
 </Solution>

@@ -30,7 +30,7 @@ Each attached UIA session owns one `UIA3Automation` instance and serializes insp
 
 ## Test fixtures
 
-The WPF and WinForms fixtures expose matching automation IDs:
+The WPF, WinForms, WinUI 3, Avalonia, and .NET MAUI Windows fixtures expose matching automation IDs:
 
 - `InvokeButton`
 - `DisabledButton`
@@ -49,4 +49,4 @@ Each operation updates `ResultText` synchronously, giving integration tests a de
 - MVP: the current UIA3 server, consent, semantic snapshots/actions, audit, rate limits, and desktop fixtures.
 - V1: binding trace collection where available, validation/layout diagnostics, screenshots with semantic overlays, virtualization helpers, and UIA2 compatibility fallback.
 - V2: opt-in authenticated in-process agent for XAML/visual trees, DataContext/dependency properties, commands, recording/replay, and hot reload events.
-- Compatibility: dedicated packaged WinUI, Avalonia, and MAUI Windows fixtures plus enterprise CI security policy.
+- Compatibility: dedicated WinUI 3, Avalonia, and MAUI Windows fixtures with UIA3 integration coverage; enterprise CI security policy remains future work.

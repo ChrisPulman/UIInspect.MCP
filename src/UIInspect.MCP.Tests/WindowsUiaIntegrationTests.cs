@@ -12,7 +12,7 @@ using UIInspect.MCP.Windows.Processes;
 
 namespace UIInspect.MCP.Tests;
 
-/// <summary>Real UIA3 integration tests against deterministic WPF and WinForms target processes.</summary>
+/// <summary>Real UIA3 integration tests against deterministic Windows UI framework processes.</summary>
 [NotInParallel]
 public sealed class WindowsUiaIntegrationTests
 {
@@ -37,11 +37,35 @@ public sealed class WindowsUiaIntegrationTests
     /// <summary>The WinForms sample project name.</summary>
     private const string WinFormsProjectName = "UIInspect.Sample.WinForms";
 
+    /// <summary>The WinUI sample project name.</summary>
+    private const string WinUiProjectName = "UIInspect.Sample.WinUI";
+
+    /// <summary>The Avalonia sample project name.</summary>
+    private const string AvaloniaProjectName = "UIInspect.Sample.Avalonia";
+
+    /// <summary>The MAUI sample project name.</summary>
+    private const string MauiProjectName = "UIInspect.Sample.Maui";
+
     /// <summary>The WPF sample title.</summary>
     private const string WpfTitle = "UIInspect WPF Sample";
 
     /// <summary>The WinForms sample title.</summary>
     private const string WinFormsTitle = "UIInspect WinForms Sample";
+
+    /// <summary>The WinUI sample title.</summary>
+    private const string WinUiTitle = "UIInspect WinUI Sample";
+
+    /// <summary>The Avalonia sample title.</summary>
+    private const string AvaloniaTitle = "UIInspect Avalonia Sample";
+
+    /// <summary>The MAUI sample title.</summary>
+    private const string MauiTitle = "UIInspect MAUI Sample";
+
+    /// <summary>The output directory shared by the classic desktop fixtures.</summary>
+    private const string DesktopOutputDirectory = "net10.0-windows";
+
+    /// <summary>The output directory shared by the WinUI-based fixtures.</summary>
+    private const string WinUiOutputDirectory = "net10.0-windows10.0.19041.0\\win-x64";
 
     /// <summary>The result text automation ID.</summary>
     private const string ResultTextId = "ResultText";
@@ -98,33 +122,55 @@ public sealed class WindowsUiaIntegrationTests
     /// <returns>A task representing the fixture assertions.</returns>
     [Test]
     public Task Wpf_fixture_supports_semantic_discovery_and_actions() =>
-        RunFixtureAsync(WpfProjectName, WpfTitle, true, TimeProvider.System);
+        RunFixtureAsync(WpfProjectName, WpfTitle, DesktopOutputDirectory, true, true, TimeProvider.System);
 
     /// <summary>WinForms exposes the cross-framework discovery, invocation, and value MVP surface.</summary>
     /// <returns>A task representing the fixture assertions.</returns>
     [Test]
     public Task WinForms_fixture_supports_semantic_discovery_and_actions() =>
-        RunFixtureAsync(WinFormsProjectName, WinFormsTitle, false, TimeProvider.System);
+        RunFixtureAsync(WinFormsProjectName, WinFormsTitle, DesktopOutputDirectory, false, true, TimeProvider.System);
+
+    /// <summary>WinUI exposes the cross-framework semantic discovery and action surface.</summary>
+    /// <returns>A task representing the fixture assertions.</returns>
+    [Test]
+    public Task WinUi_fixture_supports_semantic_discovery_and_actions() =>
+        RunFixtureAsync(WinUiProjectName, WinUiTitle, WinUiOutputDirectory, false, true, TimeProvider.System);
+
+    /// <summary>Avalonia exposes the cross-framework semantic discovery and action surface.</summary>
+    /// <returns>A task representing the fixture assertions.</returns>
+    [Test]
+    public Task Avalonia_fixture_supports_semantic_discovery_and_actions() =>
+        RunFixtureAsync(AvaloniaProjectName, AvaloniaTitle, DesktopOutputDirectory, false, false, TimeProvider.System);
+
+    /// <summary>MAUI Windows exposes the cross-framework semantic discovery and action surface.</summary>
+    /// <returns>A task representing the fixture assertions.</returns>
+    [Test]
+    public Task Maui_fixture_supports_semantic_discovery_and_actions() =>
+        RunFixtureAsync(MauiProjectName, MauiTitle, WinUiOutputDirectory, false, false, TimeProvider.System);
 
     /// <summary>Starts one fixture, then validates its discoverable UIA surface.</summary>
     /// <param name="projectName">The sample project assembly name.</param>
     /// <param name="expectedTitle">The expected top-level window title.</param>
+    /// <param name="outputDirectory">The fixture's configuration-relative output directory.</param>
     /// <param name="exerciseWpfPatterns">Whether WPF-specific fixture controls are present.</param>
+    /// <param name="providerReportsPasswords">Whether the framework's provider reports its password control.</param>
     /// <param name="timeProvider">The clock used by bounded polling.</param>
     /// <returns>A task representing the complete fixture exercise.</returns>
     private static async Task RunFixtureAsync(
         string projectName,
         string expectedTitle,
+        string outputDirectory,
         bool exerciseWpfPatterns,
+        bool providerReportsPasswords,
         TimeProvider timeProvider)
     {
-        using var process = StartFixture(projectName);
+        using var process = StartFixture(projectName, outputDirectory);
         try
         {
             var handle = await WaitForMainWindowAsync(process, timeProvider);
             var backend = new FlaUiAutomationBackend(new WindowsProcessIdentityProvider());
             var identity = await ResolveFixtureIdentityAsync(process, backend, expectedTitle, timeProvider);
-            await ExerciseFixtureAsync(backend, identity, handle, exerciseWpfPatterns, timeProvider);
+            await ExerciseFixtureAsync(backend, identity, handle, exerciseWpfPatterns, providerReportsPasswords, timeProvider);
         }
         finally
         {
@@ -137,6 +183,7 @@ public sealed class WindowsUiaIntegrationTests
     /// <param name="identity">The discovered target process.</param>
     /// <param name="handle">The target top-level window handle.</param>
     /// <param name="exerciseWpfPatterns">Whether WPF-specific controls are available.</param>
+    /// <param name="providerReportsPasswords">Whether the framework's provider reports its password control.</param>
     /// <param name="timeProvider">The clock used by bounded polling.</param>
     /// <returns>A task representing the attachment exercise.</returns>
     private static async Task ExerciseFixtureAsync(
@@ -144,6 +191,7 @@ public sealed class WindowsUiaIntegrationTests
         ProcessIdentity identity,
         IntPtr handle,
         bool exerciseWpfPatterns,
+        bool providerReportsPasswords,
         TimeProvider timeProvider)
     {
         if (exerciseWpfPatterns)
@@ -157,7 +205,7 @@ public sealed class WindowsUiaIntegrationTests
             CancellationToken.None);
         await Assert.That(attached.Target).IsEqualTo(identity);
         await Assert.That(attached.WindowHandle).IsEqualTo(handle.ToInt64());
-        await AssertSemanticTreeAsync(attached);
+        await AssertSemanticTreeAsync(attached, providerReportsPasswords);
 
         if (exerciseWpfPatterns)
         {
@@ -176,15 +224,23 @@ public sealed class WindowsUiaIntegrationTests
 
     /// <summary>Validates that semantic inspection retains IDs and protects password text.</summary>
     /// <param name="attached">The active UIA attachment.</param>
+    /// <param name="providerReportsPasswords">Whether the framework's provider reports its password control.</param>
     /// <returns>A task representing the assertions.</returns>
-    private static async Task AssertSemanticTreeAsync(IUiAutomationSession attached)
+    private static async Task AssertSemanticTreeAsync(IUiAutomationSession attached, bool providerReportsPasswords)
     {
         var snapshot = await SnapshotAsync(attached);
         await Assert.That(ContainsAutomationId(snapshot, InvokeButtonId)).IsTrue();
         await Assert.That(ContainsAutomationId(snapshot, ValueTextBoxId)).IsTrue();
         var password = FindNode(snapshot, PasswordBoxId);
-        await Assert.That(password.IsPassword).IsTrue();
-        await Assert.That(password.Name).IsEqualTo("[redacted]");
+        if (providerReportsPasswords)
+        {
+            await Assert.That(password.IsPassword).IsTrue();
+            await Assert.That(password.Name).IsEqualTo("[redacted]");
+        }
+        else
+        {
+            await Assert.That(password.Name).IsNotEqualTo("not-returned");
+        }
 
         var truncatedByDepth = await attached.InspectAsync(
             InspectionSessionId,
@@ -479,9 +535,17 @@ public sealed class WindowsUiaIntegrationTests
 
     /// <summary>Starts the compiled sample fixture process.</summary>
     /// <param name="projectName">The sample project assembly name.</param>
+    /// <param name="outputDirectory">The fixture's configuration-relative output directory.</param>
     /// <returns>The started fixture process.</returns>
-    private static Process StartFixture(string projectName) => Process.Start(new ProcessStartInfo { FileName = FindFixtureExecutable(projectName), UseShellExecute = false })
-        ?? throw new InvalidOperationException($"Could not start {projectName}.");
+    private static Process StartFixture(string projectName, string outputDirectory)
+    {
+        var startInfo = new ProcessStartInfo { FileName = FindFixtureExecutable(projectName, outputDirectory), UseShellExecute = false };
+        var windowsDirectory = Directory.GetParent(Environment.SystemDirectory)?.FullName
+            ?? throw new DirectoryNotFoundException("The Windows directory was not available.");
+        startInfo.Environment["SystemRoot"] = windowsDirectory;
+        startInfo.Environment["WINDIR"] = windowsDirectory;
+        return Process.Start(startInfo) ?? throw new InvalidOperationException($"Could not start {projectName}.");
+    }
 
     /// <summary>Stops a sample fixture after its UIA assertions complete.</summary>
     /// <param name="process">The fixture process to stop.</param>
@@ -517,8 +581,9 @@ public sealed class WindowsUiaIntegrationTests
 
     /// <summary>Locates a compiled sample executable from the workspace root.</summary>
     /// <param name="projectName">The sample project assembly name.</param>
+    /// <param name="outputDirectory">The fixture's configuration-relative output directory.</param>
     /// <returns>The compiled executable path.</returns>
-    private static string FindFixtureExecutable(string projectName)
+    private static string FindFixtureExecutable(string projectName, string outputDirectory)
     {
         var executable = Path.Combine(
             FindWorkspaceRoot(),
@@ -526,7 +591,7 @@ public sealed class WindowsUiaIntegrationTests
             projectName,
             "bin",
             "Release",
-            "net10.0-windows",
+            outputDirectory,
             $"{projectName}.exe");
         return File.Exists(executable)
             ? executable

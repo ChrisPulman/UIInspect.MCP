@@ -6,7 +6,7 @@
 
 `UIInspect.MCP.Server` is a consent-gated NuGet MCP server that gives AI agents semantic access to Windows applications through UI Automation 3 (UIA3). It discovers accessible application windows, returns bounded control trees, and performs deterministic actions against opaque element references instead of relying on screenshots or pixel coordinates.
 
-The package runs as a local stdio server on .NET 10. WPF and WinForms are directly tested. Standard controls in WinUI, Avalonia, and .NET MAUI Windows applications may be reachable when they expose UI Automation providers, but those frameworks are not yet compatibility-certified.
+The package runs as a local stdio server on .NET 10. WPF, WinForms, WinUI 3, Avalonia, and .NET MAUI Windows are directly tested against deterministic UI Automation fixtures.
 
 ## Quick Install
 
