@@ -13,7 +13,7 @@
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Maui.Controls" Version="10.0.20" />
     <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.3.1" />
-    <PackageVersion Include="ModelContextProtocol" Version="1.4.1" />
+    <PackageVersion Include="ModelContextProtocol" Version="2.0.0" />
     <PackageVersion Include="MinVer" Version="7.0.0" />
     <PackageVersion Include="TUnit" Version="1.62.0" />
     <PackageVersion Include="StyleSharp.Analyzers" Version="3.40.0" />
