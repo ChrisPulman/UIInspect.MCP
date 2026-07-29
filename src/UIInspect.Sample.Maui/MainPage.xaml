@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage
+    x:Class="UIInspect.Sample.Maui.MainPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    Title="UIInspect MAUI Sample"
+    AutomationId="SampleMauiPage"
+    SemanticProperties.Description="UIInspect MAUI Sample">
+    <ScrollView>
+        <VerticalStackLayout Margin="16" Spacing="8">
+            <Label
+                FontAttributes="Bold"
+                FontSize="20"
+                Text="UIInspect semantic action fixture" />
+
+            <Border
+                Margin="0,4,0,4"
+                Padding="12"
+                AutomationId="ControlsGroup"
+                SemanticProperties.Description="Controls"
+                Stroke="Gray"
+                StrokeShape="RoundRectangle 4">
+                <VerticalStackLayout x:Name="ActionsPanel" AutomationId="ActionsPanel" Spacing="8">
+                    <Button
+                        AutomationId="InvokeButton"
+                        SemanticProperties.Description="Invoke action"
+                        Clicked="InvokeButton_Clicked"
+                        Text="Invoke" />
+
+                    <Button
+                        AutomationId="DisabledButton"
+                        SemanticProperties.Description="Disabled"
+                        IsEnabled="False"
+                        Text="Disabled" />
+
+                    <Button
+                        x:Name="TransientTarget"
+                        AutomationId="TransientTarget"
+                        SemanticProperties.Description="Transient target"
+                        Text="Transient target" />
+
+                    <Button
+                        AutomationId="RemoveTransientButton"
+                        SemanticProperties.Description="Remove transient target"
+                        Clicked="RemoveTransientButton_Clicked"
+                        Text="Remove transient target" />
+
+                    <Entry
+                        x:Name="ValueTextBox"
+                        AutomationId="ValueTextBox"
+                        SemanticProperties.Description="Editable value"
+                        Placeholder="Editable value"
+                        Text="initial"
+                        TextChanged="ValueTextBox_TextChanged" />
+
+                    <Entry
+                        AutomationId="PasswordBox"
+                        SemanticProperties.Description="Sensitive password"
+                        IsPassword="True"
+                        Text="not-returned" />
+
+                    <Picker
+                        x:Name="ColorComboBox"
+                        AutomationId="ColorComboBox"
+                        SemanticProperties.Description="Color selection"
+                        SelectedIndex="0"
+                        SelectedIndexChanged="ColorComboBox_SelectedIndexChanged"
+                        Title="Color selection" />
+
+                    <HorizontalStackLayout Spacing="8">
+                        <CheckBox
+                            x:Name="EnabledCheckBox"
+                            AutomationId="EnabledCheckBox"
+                            SemanticProperties.Description="Enabled toggle"
+                            CheckedChanged="EnabledCheckBox_CheckedChanged"
+                            IsChecked="True" />
+                        <Label Text="Enabled" VerticalOptions="Center" />
+                    </HorizontalStackLayout>
+
+                    <VerticalStackLayout AutomationId="NavigationTree" SemanticProperties.Description="Navigation tree" Spacing="4">
+                        <Button
+                            AutomationId="RootNode"
+                            SemanticProperties.Description="Root"
+                            Clicked="RootNode_Clicked"
+                            Text="Root" />
+                        <VerticalStackLayout x:Name="ChildNodes" Margin="20,0,0,0" Spacing="4">
+                            <Button
+                                AutomationId="ChildNode"
+                                SemanticProperties.Description="Child"
+                                Clicked="ChildNode_Clicked"
+                                Text="Child" />
+                            <Label AutomationId="LeafNode" SemanticProperties.Description="Leaf" Text="Leaf" />
+                        </VerticalStackLayout>
+                    </VerticalStackLayout>
+
+                    <Entry
+                        x:Name="KeyboardTextBox"
+                        AutomationId="KeyboardTextBox"
+                        SemanticProperties.Description="Keyboard target"
+                        Placeholder="Keyboard target"
+                        Text="focus me"
+                        Unfocused="KeyboardTextBox_Unfocused" />
+
+                    <Label
+                        x:Name="KeyStatusText"
+                        AutomationId="KeyStatusText"
+                        SemanticProperties.Description="Keyboard status"
+                        Text="key:none" />
+                </VerticalStackLayout>
+            </Border>
+
+            <Entry
+                x:Name="ResultText"
+                AutomationId="ResultText"
+                SemanticProperties.Description="Last action result"
+                IsReadOnly="True"
+                Text="ready" />
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

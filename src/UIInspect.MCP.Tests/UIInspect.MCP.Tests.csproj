@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <AssemblyName>UIInspect.MCP.Tests</AssemblyName>
     <RootNamespace>UIInspect.MCP.Tests</RootNamespace>
     <IsTestProject>true</IsTestProject>
@@ -14,7 +14,10 @@
     <ProjectReference Include="..\UIInspect.MCP.Core\UIInspect.MCP.Core.csproj" />
     <ProjectReference Include="..\UIInspect.MCP.Windows\UIInspect.MCP.Windows.csproj" />
     <ProjectReference Include="..\UIInspect.MCP.Server\UIInspect.MCP.Server.csproj" />
-    <ProjectReference Include="..\UIInspect.Sample.Wpf\UIInspect.Sample.Wpf.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\UIInspect.Sample.Avalonia\UIInspect.Sample.Avalonia.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\UIInspect.Sample.Maui\UIInspect.Sample.Maui.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\UIInspect.Sample.WinForms\UIInspect.Sample.WinForms.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\UIInspect.Sample.WinUI\UIInspect.Sample.WinUI.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\UIInspect.Sample.Wpf\UIInspect.Sample.Wpf.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 </Project>
