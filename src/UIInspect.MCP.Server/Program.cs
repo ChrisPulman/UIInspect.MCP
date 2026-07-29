@@ -40,15 +40,26 @@ public static class Program
 
     /// <summary>Run the stdio MCP server.</summary>
     /// <param name="args">Command-line arguments.</param>
-    /// <returns>Completion task.</returns>
+    /// <returns>Zero on normal completion; one when explicit skill installation fails.</returns>
     [ExcludeFromCodeCoverage(Justification = "The process entry point delegates entirely to the covered CreateHost composition root.")]
-    public static async Task Main(string[] args)
+    public static async Task<int> Main(string[] args)
     {
+        if (CodexSkillInstaller.IsInstallRequested(args))
+        {
+            var result = CodexSkillInstaller.InstallBundledSkill(
+                createCodexHome: true,
+                overwrite: CodexSkillInstaller.IsForceRequested(args));
+            await Console.Error.WriteLineAsync(result.Message).ConfigureAwait(false);
+            return result.Success ? 0 : 1;
+        }
+
         if (!OperatingSystem.IsWindows())
         {
             throw new PlatformNotSupportedException("UIInspect.MCP requires Windows and an interactive desktop.");
         }
 
+        _ = CodexSkillInstaller.TryAutoInstall(Console.Error);
         await CreateHost(args).RunAsync().ConfigureAwait(false);
+        return 0;
     }
 }

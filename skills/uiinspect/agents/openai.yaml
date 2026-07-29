@@ -1,0 +1,10 @@
+interface:
+  display_name: "UIInspect"
+  short_description: "Inspect and operate Windows apps through UIA"
+  default_prompt: "Use $uiinspect to discover, consent to, inspect, and safely operate a Windows application."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "uiinspect-mcp"
+      description: "UIInspect MCP server for consent-gated Windows UI Automation"

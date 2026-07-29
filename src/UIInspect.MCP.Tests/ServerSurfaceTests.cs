@@ -1,6 +1,7 @@
 // Copyright (c) 2023-2026 Chris Pulman and Contributors. All rights reserved.
 // Chris Pulman and Contributors licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for full license information.
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol.Server;
@@ -12,13 +13,16 @@ using UIInspect.MCP.Windows.DependencyInjection;
 namespace UIInspect.MCP.Tests;
 
 /// <summary>Tests MCP tool adapters, JSON output, and the composition root.</summary>
-public sealed class ServerSurfaceTests
+public sealed partial class ServerSurfaceTests
 {
     /// <summary>The directory that contains packaged image assets.</summary>
     private const string ImagesDirectoryName = "images";
 
     /// <summary>The JSON property containing the server session identifier.</summary>
     private const string SessionIdPropertyName = "sessionId";
+
+    /// <summary>The number of exact package coordinates documented in the README.</summary>
+    private const int ExpectedPackageCoordinateCount = 4;
 
     /// <summary>JSON output uses stable web-style property names and omits nulls.</summary>
     /// <returns>A task that verifies JSON serialization.</returns>
@@ -183,6 +187,8 @@ public sealed class ServerSurfaceTests
     {
         var readme = await File.ReadAllTextAsync(Path.Combine(root, "README.md"));
         var skill = await File.ReadAllTextAsync(Path.Combine(root, "skills", "uiinspect", "SKILL.md"));
+        var skillMetadata = await File.ReadAllTextAsync(
+            Path.Combine(root, "skills", "uiinspect", "agents", "openai.yaml"));
         var packages = await File.ReadAllTextAsync(Path.Combine(root, "Directory.Packages.props"));
         var buildProperties = await File.ReadAllTextAsync(Path.Combine(root, "Directory.Build.props"));
         var buildDefinition = await File.ReadAllTextAsync(Path.Combine(root, "build", "Build.cs"));
@@ -202,7 +208,7 @@ public sealed class ServerSurfaceTests
             await Assert.That(skill).Contains(tool);
         }
 
-        await Assert.That(packages).Contains("ModelContextProtocol\" Version=\"1.4.1");
+        await Assert.That(packages).Contains("ModelContextProtocol\" Version=\"2.0.0");
         await Assert.That(packages).Contains("FlaUI.UIA3\" Version=\"5.0.0");
         await Assert.That(packages).Contains("MinVer\" Version=\"7.0.0");
         await Assert.That(packages).DoesNotContain("Nerdbank.GitVersioning");
@@ -211,16 +217,26 @@ public sealed class ServerSurfaceTests
         await Assert.That(buildDefinition).Contains("Target SynchronizeVersion");
         await Assert.That(buildDefinition).Contains("-getProperty:MinVerVersion,PackageVersion");
         await Assert.That(buildDefinition).Contains("Environment.SetEnvironmentVariable(\"MinVerVersionOverride\", _minVerVersion)");
+        await Assert.That(buildDefinition).Contains("PackageCoordinateRegex");
+        await Assert.That(buildDefinition).Contains("VerifyPackedPackage();");
         await Assert.That(solution).Contains("<Project Path=\"../build/_build.csproj\" />");
-        await Assert.That(manifestVersion).IsNotNull();
         await Assert.That(packageVersion).IsEqualTo(manifestVersion);
-        await Assert.That(readme).Contains($"dnx UIInspect.MCP.Server@{manifestVersion} --yes");
+        await VerifyReadmePackageVersionsAsync(readme, manifestVersion);
         await Assert.That(readme).Contains("images/ReadmeHero.png");
         await Assert.That(readme).Contains("<!-- mcp-name: io.github.chrispulman/uiinspect-mcp -->");
         await Assert.That(buildProperties).Contains("<PackageIcon>IconNuget.png</PackageIcon>");
         await Assert.That(serverProject).Contains("<TargetFramework>net10.0</TargetFramework>");
         await Assert.That(serverProject).DoesNotContain("<PackageVersion>");
         await Assert.That(serverProject).Contains("<PackageReadmeFile>README.md</PackageReadmeFile>");
+        await Assert.That(serverProject).Contains(@"skills\uiinspect\**\*.*");
+        await Assert.That(serverProject).Contains("PackagePath=\"skills\\uiinspect");
+        await Assert.That(serverProject).Contains("LinkBase=\"skills\\uiinspect\"");
+        await Assert.That(serverProject).Contains("CopyToOutputDirectory=\"PreserveNewest\"");
+        await Assert.That(skill).Contains("appears at most once");
+        await Assert.That(skill).Contains("Cancelling one request only stops that caller's wait");
+        await Assert.That(skill).Contains("request consent again, attach a new UIA session");
+        await Assert.That(skillMetadata).Contains("display_name: \"UIInspect\"");
+        await Assert.That(skillMetadata).Contains("value: \"uiinspect-mcp\"");
         await Assert.That(windowsProject).Contains("<TargetFramework>net10.0</TargetFramework>");
         await Assert.That(windowsProject).DoesNotContain("<UseWindowsForms>");
         await Assert.That(serverAssemblyInfo).Contains("SupportedOSPlatform(\"windows\")");
@@ -229,6 +245,27 @@ public sealed class ServerSurfaceTests
         await Assert.That(File.Exists(Path.Combine(root, ImagesDirectoryName, "GitHubLogo.png"))).IsTrue();
         await Assert.That(File.Exists(Path.Combine(root, ImagesDirectoryName, "ReadmeHero.png"))).IsTrue();
     }
+
+    /// <summary>Verifies that every literal README package coordinate uses the manifest version.</summary>
+    /// <param name="readme">README contents.</param>
+    /// <param name="manifestVersion">Expected package version.</param>
+    /// <returns>A task that verifies all package coordinates.</returns>
+    private static async Task VerifyReadmePackageVersionsAsync(string readme, string? manifestVersion)
+    {
+        await Assert.That(manifestVersion).IsNotNull();
+        var matches = PackageCoordinateRegex().Matches(readme);
+        await Assert.That(matches.Count).IsEqualTo(ExpectedPackageCoordinateCount);
+        for (var matchIndex = 0; matchIndex < matches.Count; matchIndex++)
+        {
+            var match = matches[matchIndex];
+            await Assert.That(match.Groups[1].Value).IsEqualTo(manifestVersion);
+        }
+    }
+
+    [GeneratedRegex(
+        @"UIInspect\.MCP\.Server@([^\s"",`]+)",
+        RegexOptions.CultureInvariant)]
+    private static partial Regex PackageCoordinateRegex();
 
     /// <summary>Finds the workspace root from the test output directory.</summary>
     /// <returns>The absolute workspace root path.</returns>

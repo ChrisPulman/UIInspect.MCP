@@ -3,6 +3,7 @@
 // See the LICENSE file in the project root for full license information.
 using System.Text.Json;
 using UIInspect.MCP.Core.Auditing;
+using UIInspect.MCP.Core.Configuration;
 using UIInspect.MCP.Core.Models;
 using UIInspect.MCP.Core.Security;
 using UIInspect.MCP.Windows.Automation;
@@ -107,6 +108,24 @@ public sealed class CorePolicyTests
         await Assert.That(() => registry.Grant(" ", target, UiCapability.Inspect, TimeSpan.FromSeconds(1))).Throws<ArgumentException>();
         await Assert.That(() => registry.Grant(ClientId, null!, UiCapability.Inspect, TimeSpan.FromSeconds(1))).Throws<ArgumentNullException>();
         await Assert.That(() => registry.Grant(ClientId, target, UiCapability.Inspect, TimeSpan.Zero)).Throws<ArgumentOutOfRangeException>();
+    }
+
+    /// <summary>The session prompt validates inputs before reserving or displaying a decision.</summary>
+    /// <returns>A task that verifies prompt input validation.</returns>
+    [Test]
+    public async Task Session_consent_prompt_validates_inputs()
+    {
+        var prompt = new SessionUserConsentPrompt(
+            new FakeConsentPrompt(),
+            new FakeRateLimiter(),
+            new UiInspectOptions());
+        var target = new ProcessIdentity(TestProcessId, DateTimeOffset.Parse(InitialUtcText), "app", "app.exe", 1);
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        await Assert.That(async () => { _ = await prompt.RequestAsync(null!, UiCapability.Inspect, ClientId, CancellationToken.None); }).Throws<ArgumentNullException>();
+        await Assert.That(async () => { _ = await prompt.RequestAsync(target, UiCapability.Inspect, " ", CancellationToken.None); }).Throws<ArgumentException>();
+        await Assert.That(async () => { _ = await prompt.RequestAsync(target, UiCapability.Inspect, ClientId, cancellation.Token); }).Throws<OperationCanceledException>();
     }
 
     /// <summary>The fixed-window limiter resets on time and separates buckets.</summary>

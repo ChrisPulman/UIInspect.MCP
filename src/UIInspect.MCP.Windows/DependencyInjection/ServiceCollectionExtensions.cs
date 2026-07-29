@@ -45,6 +45,11 @@ public static class ServiceCollectionExtensions
             _ = services.AddSingleton<IOperationRateLimiter, FixedWindowRateLimiter>();
             _ = services.AddSingleton<IProcessIdentityProvider, WindowsProcessIdentityProvider>();
             _ = services.AddSingleton<IUserConsentPrompt, TrustedWindowsConsentPrompt>();
+            _ = services.AddSingleton<ISessionUserConsentPrompt>(
+                static provider => new SessionUserConsentPrompt(
+                    provider.GetRequiredService<IUserConsentPrompt>(),
+                    provider.GetRequiredService<IOperationRateLimiter>(),
+                    provider.GetRequiredService<UiInspectOptions>()));
             _ = services.AddSingleton<IUiAutomationBackend, FlaUiAutomationBackend>();
             _ = services.AddSingleton<IAuditSink>(_ => new JsonLineAuditSink(resolvedAuditPath));
             _ = services.AddSingleton(CreateDependencies);
@@ -62,7 +67,7 @@ public static class ServiceCollectionExtensions
         return new(
             provider.GetRequiredService<IUiAutomationBackend>(),
             provider.GetRequiredService<IProcessIdentityProvider>(),
-            provider.GetRequiredService<IUserConsentPrompt>(),
+            provider.GetRequiredService<ISessionUserConsentPrompt>(),
             provider.GetRequiredService<ConsentRegistry>(),
             provider.GetRequiredService<IOperationRateLimiter>(),
             provider.GetRequiredService<IAuditSink>(),

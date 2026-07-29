@@ -5,6 +5,8 @@ UIInspect.MCP treats Windows UI Automation as a privileged semantic interface. A
 ## Consent and identity
 
 - Consent is requested through a trusted server-owned Windows dialog, never through target-provided text.
+- The dialog is single-flight and shown at most once per client and exact process instance during one server session. Concurrent or repeated calls share the first terminal decision, and cancellation detaches only that caller's wait.
+- Denial and the initially approved capability ceiling are retained until the server session ends. Later capability expansion is rejected without displaying another dialog.
 - Grants are scoped to the MCP client hash, exact PID, process creation time, executable identity, Windows session, capability set, and a short expiry.
 - PID alone is never an authorization identity. The process is resolved before consent, after the prompt, after UIA attachment, and before every inspection or action.
 - Grants are in memory and disappear on server restart. They are revoked when a process instance changes.
@@ -31,10 +33,10 @@ The MVP uses a local stdio principal. It does not listen on TCP. A future TCP/CI
 
 ## Rate limits
 
-Defaults per client/process instance:
+Defaults:
 
 - Discovery: 30/minute.
-- Consent prompts: 3/minute.
+- New consent dialogs: 3/minute per client. Cached decisions do not consume permits, and the native prompt itself appears at most once per client and exact process instance in a server session.
 - Inspection: 60/minute.
 - Actions: 10/minute.
 

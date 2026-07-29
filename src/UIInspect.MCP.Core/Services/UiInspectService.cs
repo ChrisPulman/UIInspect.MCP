@@ -42,6 +42,9 @@ public sealed class UiInspectService : IAsyncDisposable
     /// <summary>Missing-session error code.</summary>
     private const string SessionNotFoundCode = "session_not_found";
 
+    /// <summary>Missing-session error message.</summary>
+    private const string SessionNotFoundMessage = "The session does not exist for this client.";
+
     /// <summary>Discovery operation name.</summary>
     private const string DiscoverOperation = "discover";
 
@@ -56,6 +59,12 @@ public sealed class UiInspectService : IAsyncDisposable
 
     /// <summary>Session audit operation name.</summary>
     private const string SessionOperation = "session";
+
+    /// <summary>Close-session operation name.</summary>
+    private const string CloseSessionOperation = "close_session";
+
+    /// <summary>Session-closed audit event type.</summary>
+    private const string SessionClosedEvent = "session_closed";
 
     /// <summary>Consent-requested audit event type.</summary>
     private const string ConsentRequestedEvent = "consent_requested";
@@ -79,7 +88,7 @@ public sealed class UiInspectService : IAsyncDisposable
     private readonly ConsentRegistry _consentRegistry;
 
     /// <summary>Obtains trusted local-user approval.</summary>
-    private readonly IUserConsentPrompt _consentPrompt;
+    private readonly ISessionUserConsentPrompt _consentPrompt;
 
     /// <summary>Provides response bounds and safety limits.</summary>
     private readonly UiInspectOptions _options;
@@ -146,13 +155,6 @@ public sealed class UiInspectService : IAsyncDisposable
             return UiResult<ConsentGrantInfo>.Fail(TargetUnavailableCode, "The target process is unavailable or inaccessible.");
         }
 
-        var limited = CheckRate($"consent:{clientHash}:{target.ProcessId}:{target.StartedAtUtc.UtcTicks}", _options.ConsentPromptRatePerMinute);
-        if (limited is not null)
-        {
-            await AuditAsync(ConsentRequestedEvent, DeniedOutcome, clientHash, target, RequestConsentOperation, RateLimitedCode, cancellationToken).ConfigureAwait(false);
-            return UiResult<ConsentGrantInfo>.Fail(RateLimitedCode, "Consent prompt rate limit exceeded.", limited);
-        }
-
         var capabilities = UiCapability.Inspect;
         if (allowActions)
         {
@@ -164,12 +166,28 @@ public sealed class UiInspectService : IAsyncDisposable
             capabilities |= UiCapability.Keyboard;
         }
 
-        await AuditAsync(ConsentRequestedEvent, PendingOutcome, clientHash, target, RequestConsentOperation, null, cancellationToken).ConfigureAwait(false);
-        var approved = await _consentPrompt.RequestAsync(target, capabilities, clientId, cancellationToken).ConfigureAwait(false);
-        if (!approved)
+        var activeGrant = _consentRegistry.FindActive(clientHash, target, capabilities);
+        if (activeGrant is not null)
         {
-            await AuditAsync(ConsentDeniedEvent, DeniedOutcome, clientHash, target, RequestConsentOperation, "user_denied", cancellationToken).ConfigureAwait(false);
-            return UiResult<ConsentGrantInfo>.Fail(ConsentDeniedCode, "The local user denied access to the target process.");
+            await AuditAsync("consent_reused", AllowedOutcome, clientHash, target, RequestConsentOperation, null, cancellationToken).ConfigureAwait(false);
+            return UiResult<ConsentGrantInfo>.Ok(
+                new(activeGrant.Id, activeGrant.Target, activeGrant.Capabilities, activeGrant.ExpiresAtUtc));
+        }
+
+        await AuditAsync(ConsentRequestedEvent, PendingOutcome, clientHash, target, RequestConsentOperation, null, cancellationToken).ConfigureAwait(false);
+        var decision = await _consentPrompt.RequestAsync(target, capabilities, clientId, cancellationToken).ConfigureAwait(false);
+        if (decision.RetryAfter is { } retryAfter)
+        {
+            await AuditAsync(ConsentRequestedEvent, DeniedOutcome, clientHash, target, RequestConsentOperation, RateLimitedCode, cancellationToken).ConfigureAwait(false);
+            return UiResult<ConsentGrantInfo>.Fail(RateLimitedCode, "Consent prompt rate limit exceeded.", retryAfter);
+        }
+
+        if (!decision.IsApproved)
+        {
+            await AuditAsync(ConsentDeniedEvent, DeniedOutcome, clientHash, target, RequestConsentOperation, "user_or_session_policy_denied", cancellationToken).ConfigureAwait(false);
+            return UiResult<ConsentGrantInfo>.Fail(
+                ConsentDeniedCode,
+                "The consent request was denied or exceeds the capabilities approved for this server session.");
         }
 
         var revalidated = await _processes.ResolveAsync(processId, cancellationToken).ConfigureAwait(false);
@@ -179,7 +197,7 @@ public sealed class UiInspectService : IAsyncDisposable
             return UiResult<ConsentGrantInfo>.Fail(TargetChangedCode, "The target process changed while consent was requested.");
         }
 
-        var grant = _consentRegistry.Grant(clientHash, target, capabilities, _options.ConsentDuration);
+        var grant = _consentRegistry.GrantOrGetActive(clientHash, target, capabilities, _options.ConsentDuration);
         await AuditAsync("consent_granted", AllowedOutcome, clientHash, target, RequestConsentOperation, null, cancellationToken).ConfigureAwait(false);
         return UiResult<ConsentGrantInfo>.Ok(new(grant.Id, grant.Target, grant.Capabilities, grant.ExpiresAtUtc));
     }
@@ -357,24 +375,30 @@ public sealed class UiInspectService : IAsyncDisposable
         var clientHash = GetClientHash(clientId);
         if (!_sessions.TryGetValue(sessionId, out var entry) || !AuditHash.Matches(entry.ClientHash, clientHash))
         {
-            await AuditAsync("session_closed", DeniedOutcome, clientHash, null, "close_session", SessionNotFoundCode, cancellationToken).ConfigureAwait(false);
-            return UiResult<bool>.Fail(SessionNotFoundCode, "The session does not exist for this client.");
+            await AuditAsync(SessionClosedEvent, DeniedOutcome, clientHash, null, CloseSessionOperation, SessionNotFoundCode, cancellationToken).ConfigureAwait(false);
+            return UiResult<bool>.Fail(SessionNotFoundCode, SessionNotFoundMessage);
         }
 
-        _ = _sessions.TryRemove(sessionId, out _);
-        await entry.Session.DisposeAsync().ConfigureAwait(false);
-        await AuditAsync("session_closed", CompletedOutcome, clientHash, entry.Session.Target, "close_session", null, cancellationToken).ConfigureAwait(false);
+        if (!_sessions.TryRemove(sessionId, out var removed))
+        {
+            await AuditAsync(SessionClosedEvent, DeniedOutcome, clientHash, null, CloseSessionOperation, SessionNotFoundCode, cancellationToken).ConfigureAwait(false);
+            return UiResult<bool>.Fail(SessionNotFoundCode, SessionNotFoundMessage);
+        }
+
+        await removed.Session.DisposeAsync().ConfigureAwait(false);
+        await AuditAsync(SessionClosedEvent, CompletedOutcome, clientHash, removed.Session.Target, CloseSessionOperation, null, cancellationToken).ConfigureAwait(false);
         return UiResult<bool>.Ok(true);
     }
 
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
-        var sessions = _sessions.ToArray();
-        _sessions.Clear();
-        foreach (var pair in sessions)
+        foreach (var pair in _sessions)
         {
-            await pair.Value.Session.DisposeAsync().ConfigureAwait(false);
+            if (_sessions.TryRemove(pair.Key, out var removed))
+            {
+                await removed.Session.DisposeAsync().ConfigureAwait(false);
+            }
         }
     }
 
@@ -465,9 +489,12 @@ public sealed class UiInspectService : IAsyncDisposable
         var current = await _processes.ResolveAsync(entry.Session.Target.ProcessId, cancellationToken).ConfigureAwait(false);
         if (current != entry.Session.Target)
         {
-            _ = _sessions.TryRemove(sessionId, out _);
             _ = _consentRegistry.RevokeTarget(entry.Session.Target);
-            await entry.Session.DisposeAsync().ConfigureAwait(false);
+            if (_sessions.TryRemove(sessionId, out var removed))
+            {
+                await removed.Session.DisposeAsync().ConfigureAwait(false);
+            }
+
             await AuditAsync(SessionOperation, FailedOutcome, clientHash, entry.Session.Target, operation, TargetChangedCode, cancellationToken).ConfigureAwait(false);
             return UiResult<SessionEntry>.Fail(TargetChangedCode, "The target process exited or changed.");
         }
@@ -475,8 +502,11 @@ public sealed class UiInspectService : IAsyncDisposable
         var grant = _consentRegistry.FindActive(clientHash, current, capability);
         if (grant is null || grant.Id != entry.Grant.Id)
         {
-            _ = _sessions.TryRemove(sessionId, out _);
-            await entry.Session.DisposeAsync().ConfigureAwait(false);
+            if (_sessions.TryRemove(sessionId, out var removed))
+            {
+                await removed.Session.DisposeAsync().ConfigureAwait(false);
+            }
+
             await AuditAsync(SessionOperation, DeniedOutcome, clientHash, entry.Session.Target, operation, "consent_expired", cancellationToken).ConfigureAwait(false);
             return UiResult<SessionEntry>.Fail("consent_expired", "The required consent is absent, expired, or revoked.");
         }

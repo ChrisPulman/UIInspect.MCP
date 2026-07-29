@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using CP.BuildTools;
 using Microsoft.Build.Construction;
 using Nuke.Common;
@@ -127,12 +129,16 @@ sealed partial class Build : NukeBuild
 
     Target Pack => _ => _
         .DependsOn(Compile)
-        .Executes(() => DotNetPack(s => s
-            .SetProject(ServerProjectFile)
-            .SetConfiguration(Configuration)
-            .SetNoBuild(true)
-            .SetNoRestore(true)
-            .SetOutputDirectory(PackagesDirectory)));
+        .Executes(() =>
+        {
+            DotNetPack(s => s
+                .SetProject(ServerProjectFile)
+                .SetConfiguration(Configuration)
+                .SetNoBuild(true)
+                .SetNoRestore(true)
+                .SetOutputDirectory(PackagesDirectory));
+            VerifyPackedPackage();
+        });
 
     void SynchronizeMcpManifest()
     {
@@ -149,27 +155,125 @@ sealed partial class Build : NukeBuild
         }
 
         package["version"] = _packageVersion;
-        var updated = manifest.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine;
+        var updated = manifest
+            .ToJsonString(new JsonSerializerOptions { WriteIndented = true })
+            .ReplaceLineEndings("\n")
+            + "\n";
         WriteAllTextIfChanged(McpManifestFile, source, updated);
     }
 
     void SynchronizeReadme()
     {
         var source = File.ReadAllText(ReadmeFile);
-        var commandRegex = DnxCommandRegex();
-        if (!commandRegex.IsMatch(source))
+        var packageCoordinateRegex = PackageCoordinateRegex();
+        if (!packageCoordinateRegex.IsMatch(source))
         {
-            throw new InvalidOperationException("The README does not contain the UIInspect.MCP.Server dnx command.");
+            throw new InvalidOperationException("The README does not contain a UIInspect.MCP.Server package coordinate.");
         }
 
-        var updated = commandRegex.Replace(
+        var updated = packageCoordinateRegex.Replace(
             source,
-            _ => $"dnx UIInspect.MCP.Server@{_packageVersion} --yes");
+            _ => $"UIInspect.MCP.Server@{_packageVersion}");
+        VerifyReadmePackageVersions(updated);
         WriteAllTextIfChanged(ReadmeFile, source, updated);
     }
 
-    [GeneratedRegex(@"dnx UIInspect\.MCP\.Server@\S+ --yes", RegexOptions.CultureInvariant)]
-    private static partial Regex DnxCommandRegex();
+    void VerifyPackedPackage()
+    {
+        var packageFile = PackagesDirectory / $"UIInspect.MCP.Server.{_packageVersion}.nupkg";
+        if (!File.Exists(packageFile))
+        {
+            throw new InvalidOperationException($"The expected package was not created: {packageFile}");
+        }
+
+        using var archive = ZipFile.OpenRead(packageFile);
+        var packagedReadme = ReadPackageEntry(archive, "README.md");
+        var sourceReadme = File.ReadAllText(ReadmeFile);
+        if (!string.Equals(packagedReadme, sourceReadme, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The packaged README does not match the synchronized repository README.");
+        }
+
+        VerifyReadmePackageVersions(packagedReadme);
+
+        var manifest = JsonNode.Parse(ReadPackageEntry(archive, ".mcp/server.json"))?.AsObject()
+            ?? throw new InvalidOperationException("The packaged MCP server manifest is not a JSON object.");
+        VerifyExpectedVersion("packaged MCP manifest", manifest["version"]?.GetValue<string>());
+        VerifyExpectedVersion(
+            "packaged MCP package metadata",
+            manifest["packages"]?[0]?["version"]?.GetValue<string>());
+
+        var nuspecEntries = archive.Entries
+            .Where(static entry => entry.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (nuspecEntries.Count != 1)
+        {
+            throw new InvalidOperationException(
+                $"The package must contain exactly one nuspec file; found {nuspecEntries.Count}.");
+        }
+
+        var nuspec = XDocument.Parse(ReadPackageEntry(nuspecEntries[0]));
+        var nuspecVersion = nuspec
+            .Descendants()
+            .FirstOrDefault(static element => string.Equals(
+                element.Name.LocalName,
+                "version",
+                StringComparison.Ordinal))
+            ?.Value;
+        VerifyExpectedVersion("NuGet package", nuspecVersion);
+
+        Log.Information(
+            "Verified package README, manifest, and nuspec use MinVer package version {PackageVersion}",
+            _packageVersion);
+    }
+
+    void VerifyReadmePackageVersions(string readme)
+    {
+        var matches = PackageCoordinateRegex().Matches(readme);
+        if (matches.Count == 0)
+        {
+            throw new InvalidOperationException("The README does not contain a UIInspect.MCP.Server package coordinate.");
+        }
+
+        var mismatchedVersions = matches
+            .Select(static match => match.Groups[1].Value)
+            .Where(version => !string.Equals(version, _packageVersion, StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (mismatchedVersions.Count != 0)
+        {
+            throw new InvalidOperationException(
+                $"README package versions do not match {_packageVersion}: {string.Join(", ", mismatchedVersions)}");
+        }
+    }
+
+    void VerifyExpectedVersion(string source, string actualVersion)
+    {
+        if (!string.Equals(actualVersion, _packageVersion, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"{source} version '{actualVersion}' does not match MinVer package version '{_packageVersion}'.");
+        }
+    }
+
+    static string ReadPackageEntry(ZipArchive archive, string entryName)
+    {
+        var entry = archive.GetEntry(entryName)
+            ?? throw new InvalidOperationException($"The package does not contain {entryName}.");
+        return ReadPackageEntry(entry);
+    }
+
+    static string ReadPackageEntry(ZipArchiveEntry entry)
+    {
+        using var stream = entry.Open();
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    [GeneratedRegex(
+        @"UIInspect\.MCP\.Server@([^\s"",`]+)",
+        RegexOptions.CultureInvariant)]
+    private static partial Regex PackageCoordinateRegex();
 
     static void WriteAllTextIfChanged(AbsolutePath path, string source, string updated)
     {

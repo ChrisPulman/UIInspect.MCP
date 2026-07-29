@@ -27,6 +27,6 @@ public sealed class UiInspectOptions
     /// <summary>Gets or sets actions per minute and client/target.</summary>
     public int ActionRatePerMinute { get; set; } = 10;
 
-    /// <summary>Gets or sets consent prompts per minute and client/target.</summary>
+    /// <summary>Gets or sets genuinely new consent prompts per minute and client.</summary>
     public int ConsentPromptRatePerMinute { get; set; } = 3;
 }
