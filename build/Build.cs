@@ -29,6 +29,8 @@ sealed partial class Build : NukeBuild
 
     private static AbsolutePath ServerProjectFile => RootDirectory / "src" / "UIInspect.MCP.Server" / "UIInspect.MCP.Server.csproj";
 
+    private static AbsolutePath MauiProjectFile => RootDirectory / "src" / "UIInspect.Sample.Maui" / "UIInspect.Sample.Maui.csproj";
+
     private static AbsolutePath McpManifestFile => RootDirectory / ".mcp" / "server.json";
 
     private static AbsolutePath ReadmeFile => RootDirectory / "README.md";
@@ -68,7 +70,13 @@ sealed partial class Build : NukeBuild
 
     Target Restore => _ => _
         .DependsOn(Clean)
-        .Executes(() => DotNetRestore(s => s.SetProjectFile(Solution)));
+        .Executes(() =>
+        {
+            DotNetRestore(s => s.SetProjectFile(Solution));
+            DotNetRestore(s => s
+                .SetProjectFile(MauiProjectFile)
+                .SetRuntime("win-x64"));
+        });
 
     Target ResolveVersion => _ => _
         .DependsOn(Restore)

@@ -1,0 +1,126 @@
+<Window
+    x:Class="UIInspect.Sample.Avalonia.MainWindow"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="UIInspect Avalonia Sample"
+    Width="520"
+    Height="620"
+    AutomationProperties.AutomationId="SampleAvaloniaWindow"
+    AutomationProperties.Name="UIInspect Avalonia Sample">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="16" Spacing="8">
+            <TextBlock
+                Margin="0,0,0,4"
+                FontSize="20"
+                FontWeight="Bold"
+                Text="UIInspect semantic action fixture" />
+
+            <Border
+                Margin="0,0,0,4"
+                Padding="12"
+                AutomationProperties.AutomationId="ControlsGroup"
+                AutomationProperties.Name="Controls">
+                <StackPanel x:Name="ActionsPanel" AutomationProperties.AutomationId="ActionsPanel" Spacing="8">
+                    <TextBlock FontWeight="Bold" Text="Controls" />
+                    <Button
+                        Padding="8"
+                        AutomationProperties.AutomationId="InvokeButton"
+                        AutomationProperties.Name="Invoke action"
+                        Click="InvokeButton_Click"
+                        Content="Invoke" />
+
+                    <Button
+                        Padding="8"
+                        AutomationProperties.AutomationId="DisabledButton"
+                        Content="Disabled"
+                        IsEnabled="False" />
+
+                    <Button
+                        x:Name="TransientTarget"
+                        Padding="8"
+                        AutomationProperties.AutomationId="TransientTarget"
+                        Content="Transient target" />
+
+                    <Button
+                        Padding="8"
+                        AutomationProperties.AutomationId="RemoveTransientButton"
+                        Click="RemoveTransientButton_Click"
+                        Content="Remove transient target" />
+
+                    <TextBox
+                        Padding="6"
+                        AutomationProperties.AutomationId="ValueTextBox"
+                        AutomationProperties.Name="Editable value"
+                        Text="initial"
+                        TextChanged="ValueTextBox_TextChanged" />
+
+                    <TextBox
+                        Padding="6"
+                        AutomationProperties.AutomationId="PasswordBox"
+                        AutomationProperties.Name="Sensitive password"
+                        PasswordChar="●"
+                        Text="not-returned" />
+
+                    <ComboBox
+                        Padding="6"
+                        AutomationProperties.AutomationId="ColorComboBox"
+                        AutomationProperties.Name="Color selection"
+                        SelectedIndex="0"
+                        SelectionChanged="ColorComboBox_SelectionChanged">
+                        <ComboBoxItem AutomationProperties.AutomationId="RedItem" Content="Red" />
+                        <ComboBoxItem AutomationProperties.AutomationId="GreenItem" Content="Green" />
+                        <ComboBoxItem AutomationProperties.AutomationId="BlueItem" Content="Blue" />
+                    </ComboBox>
+
+                    <CheckBox
+                        AutomationProperties.AutomationId="EnabledCheckBox"
+                        AutomationProperties.Name="Enabled toggle"
+                        Click="EnabledCheckBox_Changed"
+                        Content="Enabled"
+                        IsChecked="True" />
+
+                    <TreeView
+                        Height="150"
+                        AutomationProperties.AutomationId="NavigationTree"
+                        AutomationProperties.Name="Navigation tree">
+                        <TreeViewItem
+                            AutomationProperties.AutomationId="RootNode"
+                            Expanded="TreeItem_Expanded"
+                            Header="Root"
+                            IsExpanded="True">
+                            <TreeViewItem
+                                AutomationProperties.AutomationId="ChildNode"
+                                Collapsed="TreeItem_Collapsed"
+                                Expanded="TreeItem_Expanded"
+                                Header="Child">
+                                <TreeViewItem
+                                    AutomationProperties.AutomationId="LeafNode"
+                                    Header="Leaf" />
+                            </TreeViewItem>
+                        </TreeViewItem>
+                    </TreeView>
+
+                    <TextBox
+                        Padding="6"
+                        AutomationProperties.AutomationId="KeyboardTextBox"
+                        AutomationProperties.Name="Keyboard target"
+                        KeyDown="KeyboardTextBox_KeyDown"
+                        Text="focus me" />
+
+                    <TextBlock
+                        x:Name="KeyStatusText"
+                        AutomationProperties.AutomationId="KeyStatusText"
+                        Text="key:none" />
+                </StackPanel>
+            </Border>
+
+            <TextBox
+                x:Name="ResultText"
+                Padding="8"
+                AutomationProperties.AutomationId="ResultText"
+                AutomationProperties.Name="Last action result"
+                IsReadOnly="True"
+                Text="ready" />
+        </StackPanel>
+    </ScrollViewer>
+</Window>
