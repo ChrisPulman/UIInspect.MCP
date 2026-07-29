@@ -10,11 +10,14 @@
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <WindowsAppSdkUndockedRegFreeWinRTInitialize>false</WindowsAppSdkUndockedRegFreeWinRTInitialize>
     <Description>Deterministic WinUI 3 UI Automation fixture for UIInspect MCP.</Description>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" />
+    <Compile Include="..\UIInspect.Sample.Windows\WindowsAppRuntimeInitializer.cs"
+             Link="WindowsAppRuntimeInitializer.cs" />
   </ItemGroup>
 </Project>

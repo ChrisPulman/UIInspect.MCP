@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <OutputType>WinExe</OutputType>
     <AssemblyName>UIInspect.Sample.Maui</AssemblyName>
     <RootNamespace>UIInspect.Sample.Maui</RootNamespace>
@@ -13,12 +14,15 @@
     <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
     <ApplicationVersion>1</ApplicationVersion>
     <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSdkUndockedRegFreeWinRTInitialize>false</WindowsAppSdkUndockedRegFreeWinRTInitialize>
     <Description>Deterministic .NET MAUI Windows UI Automation fixture for UIInspect MCP.</Description>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Maui.Controls" />
+    <Compile Include="..\UIInspect.Sample.Windows\WindowsAppRuntimeInitializer.cs"
+             Link="WindowsAppRuntimeInitializer.cs" />
     <MauiXaml Remove="Platforms\Windows\App.xaml" />
   </ItemGroup>
 </Project>
