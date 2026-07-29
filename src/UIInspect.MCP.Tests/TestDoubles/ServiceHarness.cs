@@ -36,9 +36,10 @@ internal sealed class ServiceHarness : IAsyncDisposable
         Session = new(Target);
         Backend = new(Session) { Windows = [new WindowDescriptor(Target, FixtureWindowHandle, "Fixture", "FixtureClass", "WPF", true, false)] };
         Options = options ?? CreateDefaultOptions();
+        SessionPrompt = new(Prompt, RateLimiter, Options);
         Consent = new(Time);
         Service = new(
-            new UiInspectServiceDependencies(Backend, Processes, Prompt, Consent, RateLimiter, Audit, Time),
+            new UiInspectServiceDependencies(Backend, Processes, SessionPrompt, Consent, RateLimiter, Audit, Time),
             Options);
     }
 
@@ -53,6 +54,9 @@ internal sealed class ServiceHarness : IAsyncDisposable
 
     /// <summary>Gets the fake consent prompt.</summary>
     internal FakeConsentPrompt Prompt { get; }
+
+    /// <summary>Gets the server-session prompt policy.</summary>
+    internal SessionUserConsentPrompt SessionPrompt { get; }
 
     /// <summary>Gets the fake rate limiter.</summary>
     internal FakeRateLimiter RateLimiter { get; }

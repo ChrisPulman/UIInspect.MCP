@@ -3,13 +3,13 @@
   "name": "io.github.chrispulman/uiinspect-mcp",
   "title": "UIInspect MCP Server",
   "description": "Consent-gated semantic Windows UI Automation inspection and action tools.",
-  "version": "0.1.0-alpha.0",
+  "version": "0.2.1-alpha.0.1",
   "packages": [
     {
       "registryType": "nuget",
       "registryBaseUrl": "https://api.nuget.org/v3/index.json",
       "identifier": "UIInspect.MCP.Server",
-      "version": "0.1.0-alpha.0",
+      "version": "0.2.1-alpha.0.1",
       "runtimeHint": "dnx",
       "transport": {
         "type": "stdio"

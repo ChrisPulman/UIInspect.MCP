@@ -12,6 +12,9 @@ public sealed class ConsentRegistry
     /// <summary>Active grants keyed by their opaque identifiers.</summary>
     private readonly ConcurrentDictionary<Guid, ConsentGrant> _grants = new();
 
+    /// <summary>Serializes get-or-create operations so racing consent calls share one grant.</summary>
+    private readonly Lock _grantGate = new();
+
     /// <summary>Provides current UTC time.</summary>
     private readonly TimeProvider _timeProvider;
 
@@ -46,6 +49,25 @@ public sealed class ConsentRegistry
             now.Add(duration));
         _ = _grants.TryAdd(grant.Id, grant);
         return grant;
+    }
+
+    /// <summary>Return an active matching grant or atomically create one.</summary>
+    /// <param name="clientHash">Hashed client identity.</param>
+    /// <param name="target">Exact process instance.</param>
+    /// <param name="capabilities">Granted capabilities.</param>
+    /// <param name="duration">Grant duration.</param>
+    /// <returns>The existing or newly created grant.</returns>
+    public ConsentGrant GrantOrGetActive(
+        string clientHash,
+        ProcessIdentity target,
+        UiCapability capabilities,
+        TimeSpan duration)
+    {
+        lock (_grantGate)
+        {
+            return FindActive(clientHash, target, capabilities)
+                ?? Grant(clientHash, target, capabilities, duration);
+        }
     }
 
     /// <summary>Find an active matching grant.</summary>

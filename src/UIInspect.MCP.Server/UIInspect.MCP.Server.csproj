@@ -28,7 +28,11 @@
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="" Link="README.md" />
     <None Include="..\..\.mcp\server.json" Pack="true" PackagePath=".mcp\" Link=".mcp\server.json" />
-    <None Include="..\..\skills\uiinspect\SKILL.md" Pack="true" PackagePath="skills\uiinspect\" Link="skills\uiinspect\SKILL.md" />
+    <None Include="..\..\skills\uiinspect\**\*.*"
+          Pack="true"
+          PackagePath="skills\uiinspect\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          LinkBase="skills\uiinspect" />
     <None Include="..\..\images\GitHubLogo.png" Pack="true" PackagePath="images\" Link="images\GitHubLogo.png" />
     <None Include="..\..\images\ReadmeHero.png" Pack="true" PackagePath="images\" Link="images\ReadmeHero.png" />
     <None Include="..\..\docs\mvp-design.md" Pack="true" PackagePath="docs\" Link="docs\mvp-design.md" />

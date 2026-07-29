@@ -21,6 +21,9 @@ internal sealed class FakeUiAutomationSession : IUiAutomationSession
     /// <summary>Fixture rectangle vertical origin.</summary>
     private const double RectangleY = 2;
 
+    /// <summary>Number of disposal operations.</summary>
+    private int _disposeCalls;
+
     /// <summary>Initializes a new instance of the <see cref="FakeUiAutomationSession"/> class.</summary>
     /// <param name="target">Process represented by this session.</param>
     /// <param name="windowHandle">Native window handle represented by this session.</param>
@@ -67,7 +70,7 @@ internal sealed class FakeUiAutomationSession : IUiAutomationSession
     internal List<string> Calls { get; } = [];
 
     /// <summary>Gets the number of disposal operations.</summary>
-    internal int DisposeCalls { get; private set; }
+    internal int DisposeCalls => Volatile.Read(ref _disposeCalls);
 
     /// <inheritdoc/>
     public ValueTask<UiTreeSnapshot> InspectAsync(string sessionId, int maxDepth, int maxNodes, CancellationToken cancellationToken)
@@ -104,7 +107,7 @@ internal sealed class FakeUiAutomationSession : IUiAutomationSession
     /// <inheritdoc/>
     public ValueTask DisposeAsync()
     {
-        DisposeCalls++;
+        _ = Interlocked.Increment(ref _disposeCalls);
         return ValueTask.CompletedTask;
     }
 

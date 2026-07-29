@@ -59,7 +59,8 @@ public sealed partial class TrustedWindowsConsentPrompt : IUserConsentPrompt
                     Path: {path}
                     Capabilities: {capabilities}
 
-                    UIInspect uses Windows UI Automation only. Approval expires automatically.
+                    UIInspect uses Windows UI Automation only. This decision is retained only for
+                    this server session and remains bound to this exact process and capability set.
                     """;
                 var result = MessageBox(
                     0,

@@ -72,7 +72,7 @@ public sealed class UiInspectTools
     /// <param name="cancellationToken">Request cancellation token supplied by the MCP transport.</param>
     /// <returns>A serialized consent result.</returns>
     [McpServerTool(Name = "uiinspect_request_consent")]
-    [Description("Show a trusted Windows approval dialog for one process instance. Inspection is always requested; actions and keyboard are opt-in.")]
+    [Description("Show one trusted Windows approval dialog per exact process and server session. Repeated requests reuse the decision; capability expansion is denied without another dialog.")]
     public static async Task<string> RequestConsentAsync(
         UiInspectService service,
         [Description("Target Windows process ID.")] int processId,

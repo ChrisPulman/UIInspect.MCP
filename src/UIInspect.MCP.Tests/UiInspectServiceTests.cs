@@ -3,6 +3,7 @@
 // See the LICENSE file in the project root for full license information.
 using UIInspect.MCP.Core.Configuration;
 using UIInspect.MCP.Core.Models;
+using UIInspect.MCP.Core.Security;
 using UIInspect.MCP.Core.Services;
 
 namespace UIInspect.MCP.Tests;
@@ -19,6 +20,9 @@ public sealed class UiInspectServiceTests
     /// <summary>Expected successful inspection node limit.</summary>
     private const int InspectionNodeLimit = 100;
 
+    /// <summary>Expected distinct client and process consent scopes exercised by the boundary test.</summary>
+    private const int ExpectedScopedConsentCount = 3;
+
     /// <summary>Expected missing session error code.</summary>
     private const string SessionNotFoundCode = "session_not_found";
 
@@ -30,6 +34,9 @@ public sealed class UiInspectServiceTests
 
     /// <summary>Expected expired-consent error code.</summary>
     private const string ConsentExpiredCode = "consent_expired";
+
+    /// <summary>Expected denied-consent error code.</summary>
+    private const string ConsentDeniedCode = "consent_denied";
 
     /// <summary>Expected retry duration after the discovery rate limit is exceeded.</summary>
     private const int DiscoveryRetryMilliseconds = 2000;
@@ -102,8 +109,230 @@ public sealed class UiInspectServiceTests
         await Assert.That(close.Data).IsTrue();
         await Assert.That(closeAgain.Error!.Code).IsEqualTo(SessionNotFoundCode);
         await Assert.That(harness.Session.Calls).Contains("value:e:secret");
-        await Assert.That(ContainsAuditEvent(harness.Audit.Events, "set_value", null)).IsTrue();
-        await Assert.That(ContainsAuditEvent(harness.Audit.Events, null, "secret")).IsFalse();
+        await Assert.That(ContainsAuditEvent(harness.Audit.Snapshot(), "set_value", null)).IsTrue();
+        await Assert.That(ContainsAuditEvent(harness.Audit.Snapshot(), null, "secret")).IsFalse();
+    }
+
+    /// <summary>Repeated consent reuses one server-session decision without allowing capability expansion.</summary>
+    /// <returns>A task that completes when the assertion sequence succeeds.</returns>
+    [Test]
+    public async Task Consent_is_prompted_once_per_target_session()
+    {
+        await using var harness = new ServiceHarness();
+        var first = await harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            false,
+            false,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+        var repeated = await harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            false,
+            false,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+
+        harness.Time.Advance(harness.Options.ConsentDuration);
+        var renewed = await harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            false,
+            false,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+        var escalation = await harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            true,
+            true,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+        var attach = await harness.Service.AttachAsync(
+            harness.Target.ProcessId,
+            null,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+
+        await Assert.That(first.Success).IsTrue();
+        await Assert.That(repeated.Data!.ConsentId).IsEqualTo(first.Data!.ConsentId);
+        await Assert.That(renewed.Success).IsTrue();
+        await Assert.That(renewed.Data!.ConsentId).IsNotEqualTo(first.Data.ConsentId);
+        await Assert.That(escalation.Error!.Code).IsEqualTo(ConsentDeniedCode);
+        await Assert.That(attach.Success).IsTrue();
+        await Assert.That(harness.Prompt.Requests.Count).IsEqualTo(1);
+        await Assert.That(harness.RateLimiter.Buckets.Count).IsEqualTo(1);
+    }
+
+    /// <summary>A denied decision is terminal for the target session and is replayed without another prompt.</summary>
+    /// <returns>A task that completes when the assertion sequence succeeds.</returns>
+    [Test]
+    public async Task Consent_denial_is_replayed_without_another_prompt()
+    {
+        await using var harness = new ServiceHarness();
+        harness.Prompt.Approved = false;
+        var first = await harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            false,
+            false,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+
+        harness.Prompt.Approved = true;
+        var repeated = await harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            false,
+            false,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+        var attach = await harness.Service.AttachAsync(
+            harness.Target.ProcessId,
+            null,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+
+        await Assert.That(first.Error!.Code).IsEqualTo(ConsentDeniedCode);
+        await Assert.That(repeated.Error!.Code).IsEqualTo(ConsentDeniedCode);
+        await Assert.That(attach.Error!.Code).IsEqualTo("consent_required");
+        await Assert.That(harness.Prompt.Requests.Count).IsEqualTo(1);
+        await Assert.That(harness.RateLimiter.Buckets.Count).IsEqualTo(1);
+    }
+
+    /// <summary>Concurrent consent calls share one prompt and one resulting grant.</summary>
+    /// <returns>A task that completes when the assertion sequence succeeds.</returns>
+    [Test]
+    public async Task Concurrent_consent_calls_share_one_prompt_and_grant()
+    {
+        await using var harness = new ServiceHarness();
+        harness.Prompt.DecisionSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        var first = harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            true,
+            false,
+            ServiceHarness.ClientId,
+            CancellationToken.None).AsTask();
+        var second = harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            true,
+            false,
+            ServiceHarness.ClientId,
+            CancellationToken.None).AsTask();
+
+        await Assert.That(harness.Prompt.Requests.Count).IsEqualTo(1);
+        _ = harness.Prompt.DecisionSource.TrySetResult(true);
+        var results = await Task.WhenAll(first, second);
+
+        await Assert.That(results[0].Success).IsTrue();
+        await Assert.That(results[1].Data!.ConsentId).IsEqualTo(results[0].Data!.ConsentId);
+        await Assert.That(harness.Prompt.Requests.Count).IsEqualTo(1);
+        await Assert.That(harness.RateLimiter.Buckets.Count).IsEqualTo(1);
+    }
+
+    /// <summary>Cancelling one caller detaches its wait while a retry shares the still-open prompt.</summary>
+    /// <returns>A task that completes when the assertion sequence succeeds.</returns>
+    [Test]
+    public async Task Cancelled_consent_wait_does_not_open_another_prompt()
+    {
+        await using var harness = new ServiceHarness();
+        harness.Prompt.DecisionSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancellation = new CancellationTokenSource();
+        var cancelled = harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            false,
+            false,
+            ServiceHarness.ClientId,
+            cancellation.Token).AsTask();
+
+        await cancellation.CancelAsync();
+        await Assert.That(async () => { _ = await cancelled; }).Throws<OperationCanceledException>();
+
+        var retry = harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            false,
+            false,
+            ServiceHarness.ClientId,
+            CancellationToken.None).AsTask();
+        await Assert.That(harness.Prompt.Requests.Count).IsEqualTo(1);
+        _ = harness.Prompt.DecisionSource.TrySetResult(true);
+        var result = await retry;
+
+        await Assert.That(result.Success).IsTrue();
+        await Assert.That(harness.Prompt.Requests.Count).IsEqualTo(1);
+        await Assert.That(harness.RateLimiter.Buckets.Count).IsEqualTo(1);
+    }
+
+    /// <summary>Consent reuse remains scoped to one client and one exact process identity.</summary>
+    /// <returns>A task that completes when the assertion sequence succeeds.</returns>
+    [Test]
+    public async Task Consent_scope_is_bound_to_client_and_exact_process()
+    {
+        await using var harness = new ServiceHarness();
+        var fullScope = await harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            true,
+            true,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+        var subset = await harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            false,
+            false,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+        var otherClient = await harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            false,
+            false,
+            "other-client",
+            CancellationToken.None);
+
+        var changedTarget = harness.Target with { StartedAtUtc = harness.Target.StartedAtUtc.AddSeconds(1) };
+        harness.Processes.Current = changedTarget;
+        var changedProcess = await harness.Service.RequestConsentAsync(
+            changedTarget.ProcessId,
+            false,
+            false,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+
+        await Assert.That(fullScope.Success).IsTrue();
+        await Assert.That(subset.Data!.ConsentId).IsEqualTo(fullScope.Data!.ConsentId);
+        await Assert.That(otherClient.Success).IsTrue();
+        await Assert.That(changedProcess.Success).IsTrue();
+        await Assert.That(harness.Prompt.Requests.Count).IsEqualTo(ExpectedScopedConsentCount);
+        await Assert.That(harness.RateLimiter.Buckets.Count).IsEqualTo(ExpectedScopedConsentCount);
+    }
+
+    /// <summary>Concurrent close calls dispose the platform session exactly once.</summary>
+    /// <returns>A task that completes when the assertion sequence succeeds.</returns>
+    [Test]
+    public async Task Concurrent_close_disposes_the_session_once()
+    {
+        await using var harness = new ServiceHarness();
+        var sessionId = await harness.AttachWithConsentAsync();
+        var start = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        async Task<UiResult<bool>> CloseAsync()
+        {
+            _ = await start.Task;
+            return await harness.Service.CloseSessionAsync(
+                sessionId,
+                ServiceHarness.ClientId,
+                CancellationToken.None);
+        }
+
+        var first = Task.Run(CloseAsync);
+        var second = Task.Run(CloseAsync);
+        _ = start.TrySetResult(true);
+        var results = await Task.WhenAll(first, second);
+        var successCount = 0;
+        var missingCount = 0;
+        foreach (var result in results)
+        {
+            successCount += result.Success ? 1 : 0;
+            missingCount += result.Error?.Code == SessionNotFoundCode ? 1 : 0;
+        }
+
+        await Assert.That(successCount).IsEqualTo(1);
+        await Assert.That(missingCount).IsEqualTo(1);
+        await Assert.That(harness.Session.DisposeCalls).IsEqualTo(1);
     }
 
     /// <summary>Discovery and consent return stable failures for rate, target, denial, and TOCTOU cases.</summary>
@@ -142,7 +371,7 @@ public sealed class UiInspectServiceTests
             harness.Target.ProcessId,
             false,
             false,
-            ServiceHarness.ClientId,
+            "target-change-client",
             CancellationToken.None);
 
         await Assert.That(limitedDiscovery.Error!.Code).IsEqualTo(RateLimitedCode);
@@ -251,10 +480,10 @@ public sealed class UiInspectServiceTests
 
         await Assert.That(expired.Error!.Code).IsEqualTo(ConsentExpiredCode);
         await Assert.That(expiredHarness.Session.DisposeCalls).IsEqualTo(1);
-        await Assert.That(ContainsAuditEvent(expiredHarness.Audit.Events, null, ConsentExpiredCode)).IsTrue();
+        await Assert.That(ContainsAuditEvent(expiredHarness.Audit.Snapshot(), null, ConsentExpiredCode)).IsTrue();
         await Assert.That(limited.Error!.Code).IsEqualTo(RateLimitedCode);
         await Assert.That(limited.Error.RetryAfterMilliseconds).IsEqualTo(ActionRetryMilliseconds);
-        await Assert.That(ContainsAuditEvent(limitedHarness.Audit.Events, null, RateLimitedCode)).IsTrue();
+        await Assert.That(ContainsAuditEvent(limitedHarness.Audit.Snapshot(), null, RateLimitedCode)).IsTrue();
     }
 
     /// <summary>Actions validate arguments, capability, provider errors, and rate limits.</summary>
@@ -310,13 +539,16 @@ public sealed class UiInspectServiceTests
             new(
                 harness.Backend,
                 harness.Processes,
-                harness.Prompt,
+                harness.SessionPrompt,
                 harness.Consent,
                 harness.RateLimiter,
                 harness.Audit,
                 harness.Time);
 
         await Assert.That(() => new UiInspectService(null!, harness.Options)).Throws<ArgumentNullException>();
+        await Assert.That(() => new SessionUserConsentPrompt(null!, harness.RateLimiter, harness.Options)).Throws<ArgumentNullException>();
+        await Assert.That(() => new SessionUserConsentPrompt(harness.Prompt, null!, harness.Options)).Throws<ArgumentNullException>();
+        await Assert.That(() => new SessionUserConsentPrompt(harness.Prompt, harness.RateLimiter, null!)).Throws<ArgumentNullException>();
         await Assert.That(() => new UiInspectService(CreateDependencies() with { Backend = null! }, harness.Options)).Throws<ArgumentNullException>();
         await Assert.That(() => new UiInspectService(CreateDependencies() with { Processes = null! }, harness.Options)).Throws<ArgumentNullException>();
         await Assert.That(() => new UiInspectService(CreateDependencies() with { ConsentPrompt = null! }, harness.Options)).Throws<ArgumentNullException>();

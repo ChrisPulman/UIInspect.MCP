@@ -17,7 +17,7 @@ namespace UIInspect.MCP.Core.Services;
 public sealed record UiInspectServiceDependencies(
     IUiAutomationBackend Backend,
     IProcessIdentityProvider Processes,
-    IUserConsentPrompt ConsentPrompt,
+    ISessionUserConsentPrompt ConsentPrompt,
     ConsentRegistry ConsentRegistry,
     IOperationRateLimiter RateLimiter,
     IAuditSink AuditSink,
