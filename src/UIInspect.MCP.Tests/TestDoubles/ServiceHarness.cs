@@ -25,7 +25,10 @@ internal sealed class ServiceHarness : IAsyncDisposable
 
     /// <summary>Initializes a new instance of the <see cref="ServiceHarness"/> class.</summary>
     /// <param name="options">Optional safety options.</param>
-    public ServiceHarness(UiInspectOptions? options = null)
+    /// <param name="unattendedApprovals">Optional authority shared across independent server harnesses.</param>
+    public ServiceHarness(
+        UiInspectOptions? options = null,
+        FakeUnattendedApprovalAuthorizer? unattendedApprovals = null)
     {
         Time = new(new DateTimeOffset(2026, 7, 27, 12, 0, 0, TimeSpan.Zero));
         Target = new(FixtureProcessId, Time.UtcNow.AddHours(-1), "Fixture", @"C:\Fixture.exe", 1);
@@ -38,8 +41,17 @@ internal sealed class ServiceHarness : IAsyncDisposable
         Options = options ?? CreateDefaultOptions();
         SessionPrompt = new(Prompt, RateLimiter, Options);
         Consent = new(Time);
+        UnattendedApprovals = unattendedApprovals ?? new();
         Service = new(
-            new UiInspectServiceDependencies(Backend, Processes, SessionPrompt, Consent, RateLimiter, Audit, Time),
+            new UiInspectServiceDependencies(
+                Backend,
+                Processes,
+                SessionPrompt,
+                Consent,
+                UnattendedApprovals,
+                RateLimiter,
+                Audit,
+                Time),
             Options);
     }
 
@@ -75,6 +87,9 @@ internal sealed class ServiceHarness : IAsyncDisposable
 
     /// <summary>Gets the consent registry.</summary>
     internal ConsentRegistry Consent { get; }
+
+    /// <summary>Gets the fake unattended approval authority.</summary>
+    internal FakeUnattendedApprovalAuthorizer UnattendedApprovals { get; }
 
     /// <summary>Gets the service under test.</summary>
     internal UiInspectService Service { get; }

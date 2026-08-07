@@ -20,6 +20,9 @@ public sealed class CorePolicyTests
     /// <summary>The start instant used by deterministic policy tests.</summary>
     private const string InitialUtcText = "2026-07-27T12:00:00Z";
 
+    /// <summary>Executable path used by deterministic process fixtures.</summary>
+    private const string TestExecutablePath = "app.exe";
+
     /// <summary>The ordinal assigned to the third selector.</summary>
     private const int ThirdOrdinal = 2;
 
@@ -43,6 +46,12 @@ public sealed class CorePolicyTests
 
     /// <summary>The expected number of JSON lines in the audit file.</summary>
     private const int ExpectedAuditLineCount = 2;
+
+    /// <summary>An approval duration between offered choices.</summary>
+    private const int UnsupportedApprovalHours = 3;
+
+    /// <summary>An approval duration beyond the maximum offered choice.</summary>
+    private const int ExcessiveApprovalHours = 25;
 
     /// <summary>Result factories preserve success and safe error data.</summary>
     /// <returns>A task that verifies result factories.</returns>
@@ -85,7 +94,7 @@ public sealed class CorePolicyTests
     {
         var time = new FakeTimeProvider(DateTimeOffset.Parse(InitialUtcText));
         var registry = new ConsentRegistry(time);
-        var target = new ProcessIdentity(TestProcessId, time.UtcNow, "app", "app.exe", 1);
+        var target = new ProcessIdentity(TestProcessId, time.UtcNow, "app", TestExecutablePath, 1);
         var other = target with { StartedAtUtc = target.StartedAtUtc.AddSeconds(1) };
         var first = registry.Grant(ClientId, target, UiCapability.Inspect, TimeSpan.FromMinutes(1));
         _ = registry.Grant(ClientId, other, UiCapability.Interact, TimeSpan.FromMinutes(RateLimit));
@@ -108,6 +117,60 @@ public sealed class CorePolicyTests
         await Assert.That(() => registry.Grant(" ", target, UiCapability.Inspect, TimeSpan.FromSeconds(1))).Throws<ArgumentException>();
         await Assert.That(() => registry.Grant(ClientId, null!, UiCapability.Inspect, TimeSpan.FromSeconds(1))).Throws<ArgumentNullException>();
         await Assert.That(() => registry.Grant(ClientId, target, UiCapability.Inspect, TimeSpan.Zero)).Throws<ArgumentOutOfRangeException>();
+        await Assert.That(() => registry.GrantUntil(
+            ClientId,
+            target,
+            UiCapability.Inspect,
+            time.UtcNow,
+            ConsentOrigin.UnattendedApprovalLease,
+            Guid.NewGuid())).Throws<ArgumentOutOfRangeException>();
+    }
+
+    /// <summary>Unattended approval accepts only the six user-visible fixed windows.</summary>
+    /// <returns>A task that verifies the fixed-duration policy.</returns>
+    [Test]
+    public async Task Unattended_approval_durations_are_fixed_and_bounded()
+    {
+        var supported = new[] { 1, 2, 5, 8, 12, 24 };
+        foreach (var hours in supported)
+        {
+            await Assert.That(UnattendedApprovalDurations.IsSupported(hours)).IsTrue();
+            await Assert.That(UnattendedApprovalDurations.FromHours(hours)).IsEqualTo(TimeSpan.FromHours(hours));
+        }
+
+        await Assert.That(UnattendedApprovalDurations.SupportedHours).IsEquivalentTo(supported);
+        await Assert.That(UnattendedApprovalDurations.IsSupported(0)).IsFalse();
+        await Assert.That(UnattendedApprovalDurations.IsSupported(UnsupportedApprovalHours)).IsFalse();
+        await Assert.That(static () => UnattendedApprovalDurations.FromHours(ExcessiveApprovalHours)).Throws<ArgumentOutOfRangeException>();
+    }
+
+    /// <summary>The non-Windows unattended authority always fails closed and preserves cancellation.</summary>
+    /// <returns>A task that verifies the fail-closed authority.</returns>
+    [Test]
+    public async Task Missing_unattended_authority_fails_closed()
+    {
+        var authorizer = new NoUnattendedApprovalAuthorizer();
+        var target = new ProcessIdentity(
+            TestProcessId,
+            DateTimeOffset.Parse(InitialUtcText),
+            "app",
+            TestExecutablePath,
+            1);
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        await Assert.That(
+            await authorizer.GetActiveLeaseAsync(UiCapability.Inspect, CancellationToken.None)).IsNull();
+        await Assert.That(
+            await authorizer.ValidateAsync(Guid.NewGuid(), target, UiCapability.Inspect, CancellationToken.None)).IsFalse();
+        await Assert.That(() => authorizer.ValidateAsync(
+            Guid.NewGuid(),
+            null!,
+            UiCapability.Inspect,
+            CancellationToken.None).AsTask()).Throws<ArgumentNullException>();
+        await Assert.That(() => authorizer.GetActiveLeaseAsync(
+            UiCapability.Inspect,
+            cancellation.Token).AsTask()).Throws<OperationCanceledException>();
     }
 
     /// <summary>The session prompt validates inputs before reserving or displaying a decision.</summary>
@@ -119,7 +182,7 @@ public sealed class CorePolicyTests
             new FakeConsentPrompt(),
             new FakeRateLimiter(),
             new UiInspectOptions());
-        var target = new ProcessIdentity(TestProcessId, DateTimeOffset.Parse(InitialUtcText), "app", "app.exe", 1);
+        var target = new ProcessIdentity(TestProcessId, DateTimeOffset.Parse(InitialUtcText), "app", TestExecutablePath, 1);
         using var cancellation = new CancellationTokenSource();
         await cancellation.CancelAsync();
 

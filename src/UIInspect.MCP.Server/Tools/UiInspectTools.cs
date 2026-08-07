@@ -3,6 +3,8 @@
 // See the LICENSE file in the project root for full license information.
 using System.ComponentModel;
 using ModelContextProtocol.Server;
+using UIInspect.MCP.Core.Abstractions;
+using UIInspect.MCP.Core.Models;
 using UIInspect.MCP.Core.Services;
 using UIInspect.MCP.Server.Serialization;
 
@@ -42,6 +44,34 @@ public sealed class UiInspectTools
     {
         ArgumentNullException.ThrowIfNull(service);
         return JsonOutput.Serialize(await service.DiscoverAsync(ConnectedStdioClientId, cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>Report whether a shared unattended approval window is active.</summary>
+    /// <param name="authorizer">Current user/session unattended approval authority.</param>
+    /// <returns>A serialized approval status.</returns>
+    public static Task<string> GetUnattendedApprovalAsync(IUnattendedApprovalAuthorizer authorizer) =>
+        GetUnattendedApprovalAsync(authorizer, CancellationToken.None);
+
+    /// <summary>Report whether a shared unattended approval window is active.</summary>
+    /// <param name="authorizer">Current user/session unattended approval authority.</param>
+    /// <param name="cancellationToken">Request cancellation token.</param>
+    /// <returns>A serialized approval status.</returns>
+    [McpServerTool(Name = "uiinspect_get_unattended_approval")]
+    [Description("Report the current Windows user/session unattended approval window. Activate or revoke it only through the trusted uiinspect-mcp manager commands.")]
+    public static async Task<string> GetUnattendedApprovalAsync(
+        IUnattendedApprovalAuthorizer authorizer,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(authorizer);
+        var lease = await authorizer
+            .GetActiveLeaseAsync(UiCapability.Inspect, cancellationToken)
+            .ConfigureAwait(false);
+        return lease is null
+            ? JsonOutput.Serialize(
+                UiResult<UnattendedApprovalLease>.Fail(
+                    "unattended_approval_inactive",
+                    "Run 'uiinspect-mcp --authorize-unattended <1|2|5|8|12|24>' and approve the trusted Windows dialog."))
+            : JsonOutput.Serialize(UiResult<UnattendedApprovalLease>.Ok(lease));
     }
 
     /// <summary>Show a trusted local-user consent prompt for a read-only process inspection.</summary>

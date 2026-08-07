@@ -87,6 +87,9 @@ public sealed class UiInspectService : IAsyncDisposable
     /// <summary>Stores short-lived grants.</summary>
     private readonly ConsentRegistry _consentRegistry;
 
+    /// <summary>Validates optional user-session unattended approval leases.</summary>
+    private readonly IUnattendedApprovalAuthorizer _unattendedApprovals;
+
     /// <summary>Obtains trusted local-user approval.</summary>
     private readonly ISessionUserConsentPrompt _consentPrompt;
 
@@ -112,6 +115,7 @@ public sealed class UiInspectService : IAsyncDisposable
         _processes = dependencies.Processes ?? throw new ArgumentNullException(nameof(dependencies.Processes));
         _consentPrompt = dependencies.ConsentPrompt ?? throw new ArgumentNullException(nameof(dependencies.ConsentPrompt));
         _consentRegistry = dependencies.ConsentRegistry ?? throw new ArgumentNullException(nameof(dependencies.ConsentRegistry));
+        _unattendedApprovals = dependencies.UnattendedApprovals ?? throw new ArgumentNullException(nameof(dependencies.UnattendedApprovals));
         _rateLimiter = dependencies.RateLimiter ?? throw new ArgumentNullException(nameof(dependencies.RateLimiter));
         _auditSink = dependencies.AuditSink ?? throw new ArgumentNullException(nameof(dependencies.AuditSink));
         _timeProvider = dependencies.TimeProvider ?? throw new ArgumentNullException(nameof(dependencies.TimeProvider));
@@ -155,23 +159,17 @@ public sealed class UiInspectService : IAsyncDisposable
             return UiResult<ConsentGrantInfo>.Fail(TargetUnavailableCode, "The target process is unavailable or inaccessible.");
         }
 
-        var capabilities = UiCapability.Inspect;
-        if (allowActions)
+        var capabilities = BuildCapabilities(allowActions, allowKeyboard);
+        var reused = await TryReuseConsentAsync(clientHash, target, capabilities, cancellationToken).ConfigureAwait(false);
+        if (reused is not null)
         {
-            capabilities |= UiCapability.Interact;
+            return reused;
         }
 
-        if (allowKeyboard)
+        var unattended = await TryGrantUnattendedConsentAsync(clientHash, target, capabilities, cancellationToken).ConfigureAwait(false);
+        if (unattended is not null)
         {
-            capabilities |= UiCapability.Keyboard;
-        }
-
-        var activeGrant = _consentRegistry.FindActive(clientHash, target, capabilities);
-        if (activeGrant is not null)
-        {
-            await AuditAsync("consent_reused", AllowedOutcome, clientHash, target, RequestConsentOperation, null, cancellationToken).ConfigureAwait(false);
-            return UiResult<ConsentGrantInfo>.Ok(
-                new(activeGrant.Id, activeGrant.Target, activeGrant.Capabilities, activeGrant.ExpiresAtUtc));
+            return unattended;
         }
 
         await AuditAsync(ConsentRequestedEvent, PendingOutcome, clientHash, target, RequestConsentOperation, null, cancellationToken).ConfigureAwait(false);
@@ -199,7 +197,8 @@ public sealed class UiInspectService : IAsyncDisposable
 
         var grant = _consentRegistry.GrantOrGetActive(clientHash, target, capabilities, _options.ConsentDuration);
         await AuditAsync("consent_granted", AllowedOutcome, clientHash, target, RequestConsentOperation, null, cancellationToken).ConfigureAwait(false);
-        return UiResult<ConsentGrantInfo>.Ok(new(grant.Id, grant.Target, grant.Capabilities, grant.ExpiresAtUtc));
+        return UiResult<ConsentGrantInfo>.Ok(
+            new(grant.Id, grant.Target, grant.Capabilities, grant.ExpiresAtUtc, grant.Origin));
     }
 
     /// <summary>Attach a consent-gated session by process ID and optional native window handle.</summary>
@@ -219,8 +218,14 @@ public sealed class UiInspectService : IAsyncDisposable
         }
 
         var grant = _consentRegistry.FindActive(clientHash, target, UiCapability.Inspect);
-        if (grant is null)
+        if (grant is null
+            || !await IsGrantAuthorityActiveAsync(grant, UiCapability.Inspect, cancellationToken).ConfigureAwait(false))
         {
+            if (grant is not null)
+            {
+                _ = _consentRegistry.Revoke(grant.Id);
+            }
+
             await AuditAsync(AttachOperation, DeniedOutcome, clientHash, target, AttachOperation, "consent_required", cancellationToken).ConfigureAwait(false);
             return UiResult<AutomationSessionInfo>.Fail("consent_required", "Request local-user consent for this process instance before attaching.");
         }
@@ -407,11 +412,38 @@ public sealed class UiInspectService : IAsyncDisposable
     /// <returns>Stable non-secret hash.</returns>
     private static string GetClientHash(string clientId) => AuditHash.Compute(clientId);
 
+    /// <summary>Build the requested capability ceiling.</summary>
+    /// <param name="allowActions">Whether semantic interaction is requested.</param>
+    /// <param name="allowKeyboard">Whether logical keyboard input is requested.</param>
+    /// <returns>Requested capabilities.</returns>
+    private static UiCapability BuildCapabilities(bool allowActions, bool allowKeyboard)
+    {
+        var capabilities = UiCapability.Inspect;
+        if (allowActions)
+        {
+            capabilities |= UiCapability.Interact;
+        }
+
+        if (allowKeyboard)
+        {
+            capabilities |= UiCapability.Keyboard;
+        }
+
+        return capabilities;
+    }
+
+    /// <summary>Create the public, redacted view of a local grant.</summary>
+    /// <param name="grant">Local grant.</param>
+    /// <returns>Public grant details.</returns>
+    private static ConsentGrantInfo ToGrantInfo(ConsentGrant grant) =>
+        new(grant.Id, grant.Target, grant.Capabilities, grant.ExpiresAtUtc, grant.Origin);
+
     /// <summary>Validates immutable server safety limits.</summary>
     /// <param name="options">Options to validate.</param>
     private static void ValidateOptions(UiInspectOptions options)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.ConsentDuration, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.ConsentPromptTimeout, TimeSpan.Zero);
         ArgumentOutOfRangeException.ThrowIfLessThan(options.MaximumTreeDepth, 0);
         ArgumentOutOfRangeException.ThrowIfLessThan(options.MaximumTreeNodes, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(options.DiscoveryRatePerMinute, 1);
@@ -425,6 +457,87 @@ public sealed class UiInspectService : IAsyncDisposable
     /// <returns>Retry delay, when supplied.</returns>
     private static TimeSpan? ToRetryAfter(UiError error) =>
         error.RetryAfterMilliseconds is double milliseconds ? TimeSpan.FromMilliseconds(milliseconds) : null;
+
+    /// <summary>Reuse one active locally cached grant after validating its authority.</summary>
+    /// <param name="clientHash">Hashed client identity.</param>
+    /// <param name="target">Exact process identity.</param>
+    /// <param name="capabilities">Required capabilities.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A successful result, or <see langword="null"/> when no reusable grant exists.</returns>
+    private async ValueTask<UiResult<ConsentGrantInfo>?> TryReuseConsentAsync(
+        string clientHash,
+        ProcessIdentity target,
+        UiCapability capabilities,
+        CancellationToken cancellationToken)
+    {
+        var activeGrant = _consentRegistry.FindActive(clientHash, target, capabilities);
+        if (activeGrant is null)
+        {
+            return null;
+        }
+
+        if (!await IsGrantAuthorityActiveAsync(activeGrant, capabilities, cancellationToken).ConfigureAwait(false))
+        {
+            _ = _consentRegistry.Revoke(activeGrant.Id);
+            return null;
+        }
+
+        await AuditAsync("consent_reused", AllowedOutcome, clientHash, target, RequestConsentOperation, null, cancellationToken).ConfigureAwait(false);
+        return UiResult<ConsentGrantInfo>.Ok(ToGrantInfo(activeGrant));
+    }
+
+    /// <summary>Exchange an active broker lease for one exact-process local grant.</summary>
+    /// <param name="clientHash">Hashed client identity.</param>
+    /// <param name="target">Exact process identity.</param>
+    /// <param name="capabilities">Required capabilities.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A grant result, or <see langword="null"/> when no unattended lease exists.</returns>
+    private async ValueTask<UiResult<ConsentGrantInfo>?> TryGrantUnattendedConsentAsync(
+        string clientHash,
+        ProcessIdentity target,
+        UiCapability capabilities,
+        CancellationToken cancellationToken)
+    {
+        var lease = await _unattendedApprovals
+            .GetActiveLeaseAsync(capabilities, cancellationToken)
+            .ConfigureAwait(false);
+        if (lease is null || lease.ExpiresAtUtc <= _timeProvider.GetUtcNow())
+        {
+            return null;
+        }
+
+        var current = await _processes.ResolveAsync(target.ProcessId, cancellationToken).ConfigureAwait(false);
+        var valid = current == target
+            && await _unattendedApprovals
+                .ValidateAsync(lease.LeaseId, target, capabilities, cancellationToken)
+                .ConfigureAwait(false);
+        if (!valid)
+        {
+            await AuditAsync(ConsentDeniedEvent, DeniedOutcome, clientHash, target, RequestConsentOperation, TargetChangedCode, cancellationToken).ConfigureAwait(false);
+            return UiResult<ConsentGrantInfo>.Fail(
+                TargetChangedCode,
+                "The target process or unattended approval changed while consent was requested.");
+        }
+
+        ConsentGrant grant;
+        try
+        {
+            grant = _consentRegistry.GrantOrGetActiveUntil(
+                clientHash,
+                target,
+                capabilities,
+                lease.ExpiresAtUtc,
+                ConsentOrigin.UnattendedApprovalLease,
+                lease.LeaseId);
+        }
+        catch (ArgumentOutOfRangeException) when (lease.ExpiresAtUtc <= _timeProvider.GetUtcNow())
+        {
+            return null;
+        }
+
+        await AuditAsync("consent_granted", AllowedOutcome, clientHash, target, RequestConsentOperation, "unattended_approval", cancellationToken).ConfigureAwait(false);
+        return UiResult<ConsentGrantInfo>.Ok(ToGrantInfo(grant));
+    }
 
     /// <summary>Executes a consent-gated semantic action.</summary>
     /// <param name="sessionId">Opaque session identifier.</param>
@@ -500,7 +613,9 @@ public sealed class UiInspectService : IAsyncDisposable
         }
 
         var grant = _consentRegistry.FindActive(clientHash, current, capability);
-        if (grant is null || grant.Id != entry.Grant.Id)
+        if (grant is null
+            || grant.Id != entry.Grant.Id
+            || !await IsGrantAuthorityActiveAsync(grant, capability, cancellationToken).ConfigureAwait(false))
         {
             if (_sessions.TryRemove(sessionId, out var removed))
             {
@@ -519,6 +634,26 @@ public sealed class UiInspectService : IAsyncDisposable
 
         await AuditAsync(SessionOperation, DeniedOutcome, clientHash, entry.Session.Target, operation, RateLimitedCode, cancellationToken).ConfigureAwait(false);
         return UiResult<SessionEntry>.Fail(RateLimitedCode, $"{operation} rate limit exceeded.", limited);
+    }
+
+    /// <summary>Validate any external authority associated with a local grant.</summary>
+    /// <param name="grant">Local grant.</param>
+    /// <param name="requiredCapabilities">Capabilities required by the operation.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><see langword="true"/> while the grant authority remains active.</returns>
+    private ValueTask<bool> IsGrantAuthorityActiveAsync(
+        ConsentGrant grant,
+        UiCapability requiredCapabilities,
+        CancellationToken cancellationToken)
+    {
+        if (grant.Origin == ConsentOrigin.ExplicitWindowsPrompt)
+        {
+            return ValueTask.FromResult(true);
+        }
+
+        return grant.AuthorityId is Guid authorityId
+            ? _unattendedApprovals.ValidateAsync(authorityId, grant.Target, requiredCapabilities, cancellationToken)
+            : ValueTask.FromResult(false);
     }
 
     /// <summary>Obtains a rate-limit retry delay when an operation cannot proceed.</summary>

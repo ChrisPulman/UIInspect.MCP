@@ -55,7 +55,7 @@ public sealed class SessionUserConsentPrompt : ISessionUserConsentPrompt
         var candidate = new ConsentSessionDecision(
             capabilities,
             new(
-                () => RequestOnceAsync(target, capabilities, clientId),
+                () => RequestOnceAsync(key, target, capabilities, clientId),
                 LazyThreadSafetyMode.ExecutionAndPublication));
         var decision = _decisions.GetOrAdd(
             key,
@@ -78,7 +78,7 @@ public sealed class SessionUserConsentPrompt : ISessionUserConsentPrompt
         CancellationToken cancellationToken)
     {
         var result = await decision.Decision.Value.WaitAsync(cancellationToken).ConfigureAwait(false);
-        if (result.RetryAfter is not null)
+        if (result.RetryAfter is not null || !result.IsTerminal)
         {
             _ = _decisions.TryRemove(new(key, decision));
         }
@@ -87,11 +87,13 @@ public sealed class SessionUserConsentPrompt : ISessionUserConsentPrompt
     }
 
     /// <summary>Display the trusted prompt independently of any one request's lifetime.</summary>
+    /// <param name="key">Exact session decision key.</param>
     /// <param name="target">Exact target process instance.</param>
     /// <param name="capabilities">Capabilities requested by the first caller.</param>
     /// <param name="clientId">Initiating client identity.</param>
     /// <returns>The terminal prompt decision.</returns>
     private async Task<SessionConsentDecision> RequestOnceAsync(
+        ConsentSessionKey key,
         ProcessIdentity target,
         UiCapability capabilities,
         string clientId)
@@ -106,12 +108,21 @@ public sealed class SessionUserConsentPrompt : ISessionUserConsentPrompt
             return new(false, rateDecision.RetryAfter);
         }
 
-        var approved = await _innerPrompt.RequestAsync(
-            target,
-            capabilities,
-            clientId,
-            CancellationToken.None).ConfigureAwait(false);
-        return new(approved, null);
+        using var promptTimeout = new CancellationTokenSource(_options.ConsentPromptTimeout);
+        try
+        {
+            var approved = await _innerPrompt.RequestAsync(
+                target,
+                capabilities,
+                clientId,
+                promptTimeout.Token).ConfigureAwait(false);
+            return new(approved, null);
+        }
+        catch (OperationCanceledException)
+        {
+            _ = _decisions.TryRemove(key, out _);
+            return new(false, null, false);
+        }
     }
 
     /// <summary>Identifies one consent session without allowing PID reuse or cross-client reuse.</summary>

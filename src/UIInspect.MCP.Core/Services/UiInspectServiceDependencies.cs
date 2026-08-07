@@ -11,6 +11,7 @@ namespace UIInspect.MCP.Core.Services;
 /// <param name="Processes">Live process identity resolver.</param>
 /// <param name="ConsentPrompt">Trusted local-user consent prompt.</param>
 /// <param name="ConsentRegistry">Short-lived consent registry.</param>
+/// <param name="UnattendedApprovals">Optional user-session unattended approval authority.</param>
 /// <param name="RateLimiter">Operation rate limiter.</param>
 /// <param name="AuditSink">Redacted audit sink.</param>
 /// <param name="TimeProvider">UTC time provider.</param>
@@ -19,6 +20,7 @@ public sealed record UiInspectServiceDependencies(
     IProcessIdentityProvider Processes,
     ISessionUserConsentPrompt ConsentPrompt,
     ConsentRegistry ConsentRegistry,
+    IUnattendedApprovalAuthorizer UnattendedApprovals,
     IOperationRateLimiter RateLimiter,
     IAuditSink AuditSink,
     TimeProvider TimeProvider);

@@ -10,4 +10,14 @@ namespace UIInspect.MCP.Core.Models;
 /// <param name="Capabilities">Granted capabilities.</param>
 /// <param name="GrantedAtUtc">Grant time.</param>
 /// <param name="ExpiresAtUtc">Expiry time.</param>
-public sealed record ConsentGrant(Guid Id, string ClientHash, ProcessIdentity Target, UiCapability Capabilities, DateTimeOffset GrantedAtUtc, DateTimeOffset ExpiresAtUtc);
+/// <param name="Origin">Authority that produced the grant.</param>
+/// <param name="AuthorityId">Optional external authority identifier.</param>
+public sealed record ConsentGrant(
+    Guid Id,
+    string ClientHash,
+    ProcessIdentity Target,
+    UiCapability Capabilities,
+    DateTimeOffset GrantedAtUtc,
+    DateTimeOffset ExpiresAtUtc,
+    ConsentOrigin Origin,
+    Guid? AuthorityId);

@@ -24,6 +24,15 @@ public sealed partial class ServerSurfaceTests
     /// <summary>The number of exact package coordinates documented in the README.</summary>
     private const int ExpectedPackageCoordinateCount = 4;
 
+    /// <summary>Exit code returned for invalid manager arguments.</summary>
+    private const int InvalidArgumentsExitCode = 2;
+
+    /// <summary>Approval duration between supported choices.</summary>
+    private const int UnsupportedApprovalHours = 3;
+
+    /// <summary>Approval duration above the supported maximum.</summary>
+    private const int ExcessiveApprovalHours = 25;
+
     /// <summary>JSON output uses stable web-style property names and omits nulls.</summary>
     /// <returns>A task that verifies JSON serialization.</returns>
     [Test]
@@ -41,7 +50,13 @@ public sealed partial class ServerSurfaceTests
     public async Task Tools_delegate_every_mvp_operation()
     {
         await using var harness = new ServiceHarness();
+        harness.UnattendedApprovals.Lease = new(
+            Guid.NewGuid(),
+            UIInspect.MCP.Core.Models.UiCapability.Inspect,
+            harness.Time.UtcNow,
+            harness.Time.UtcNow.AddHours(1));
         var discover = await UiInspectTools.DiscoverWindowsAsync(harness.Service);
+        var unattended = await UiInspectTools.GetUnattendedApprovalAsync(harness.UnattendedApprovals);
         var consent = await UiInspectTools.RequestConsentAsync(
             harness.Service,
             harness.Target.ProcessId,
@@ -69,6 +84,7 @@ public sealed partial class ServerSurfaceTests
         foreach (var json in new[]
         {
             discover,
+            unattended,
             consent,
             attach,
             inspect,
@@ -92,6 +108,7 @@ public sealed partial class ServerSurfaceTests
     public async Task Tools_reject_null_services()
     {
         await Assert.That(static async () => { _ = await UiInspectTools.DiscoverWindowsAsync(null!); }).Throws<ArgumentNullException>();
+        await Assert.That(static async () => { _ = await UiInspectTools.GetUnattendedApprovalAsync(null!); }).Throws<ArgumentNullException>();
         await Assert.That(static async () => { _ = await UiInspectTools.RequestConsentAsync(null!, 1); }).Throws<ArgumentNullException>();
         await Assert.That(static async () => { _ = await UiInspectTools.AttachAsync(null!, 1); }).Throws<ArgumentNullException>();
         await Assert.That(static async () => { _ = await UiInspectTools.InspectTreeAsync(null!, "s"); }).Throws<ArgumentNullException>();
@@ -102,6 +119,37 @@ public sealed partial class ServerSurfaceTests
         await Assert.That(static async () => { _ = await UiInspectTools.ExpandCollapseAsync(null!, "s", "e", true); }).Throws<ArgumentNullException>();
         await Assert.That(static async () => { _ = await UiInspectTools.SendKeyAsync(null!, "s", "e", "ENTER"); }).Throws<ArgumentNullException>();
         await Assert.That(static async () => { _ = await UiInspectTools.CloseSessionAsync(null!, "s"); }).Throws<ArgumentNullException>();
+    }
+
+    /// <summary>The status tool reports inactivity without granting authority.</summary>
+    /// <returns>A task that verifies the inactive diagnostic response.</returns>
+    [Test]
+    public async Task Unattended_status_tool_fails_closed_when_inactive()
+    {
+        var json = await UiInspectTools.GetUnattendedApprovalAsync(new FakeUnattendedApprovalAuthorizer());
+
+        await Assert.That(json).Contains("unattended_approval_inactive");
+        await Assert.That(json).Contains("--authorize-unattended");
+    }
+
+    /// <summary>Manager commands reject malformed or unsupported windows before any trusted dialog is shown.</summary>
+    /// <returns>A task that verifies command-line validation.</returns>
+    [Test]
+    public async Task Manager_commands_reject_invalid_approval_windows()
+    {
+        var missing = await UIInspect.MCP.Server.Program.Main(["--authorize-unattended"]);
+        var unsupported = await UIInspect.MCP.Server.Program.Main(
+            [$"--authorize-unattended={UnsupportedApprovalHours}"]);
+        var privateUnsupported = await UIInspect.MCP.Server.Program.Main(
+            ["--run-unattended-broker", ExcessiveApprovalHours.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+        var status = await UIInspect.MCP.Server.Program.Main(["--unattended-status"]);
+
+        await Assert.That(missing).IsEqualTo(InvalidArgumentsExitCode);
+        await Assert.That(unsupported).IsEqualTo(InvalidArgumentsExitCode);
+        await Assert.That(privateUnsupported).IsEqualTo(InvalidArgumentsExitCode);
+        await Assert.That(status is 0 or 1).IsTrue();
+        await Assert.That(static () => UIInspect.MCP.Windows.Security.WindowsUnattendedApprovalLauncher
+            .StartAsync(UnsupportedApprovalHours, CancellationToken.None)).Throws<ArgumentOutOfRangeException>();
     }
 
     /// <summary>The production host registers the coordinator and MCP services.</summary>
@@ -133,6 +181,7 @@ public sealed partial class ServerSurfaceTests
         var expectedTools = new[]
         {
             "uiinspect_discover_windows",
+            "uiinspect_get_unattended_approval",
             "uiinspect_request_consent",
             "uiinspect_attach",
             "uiinspect_inspect_tree",
@@ -208,8 +257,8 @@ public sealed partial class ServerSurfaceTests
             await Assert.That(skill).Contains(tool);
         }
 
-        await Assert.That(packages).Contains("ModelContextProtocol\" Version=\"2.0.0");
-        await Assert.That(packages).Contains("FlaUI.UIA3\" Version=\"5.0.0");
+        await Assert.That(packages).Contains("ModelContextProtocol\" Version=\"2.1.0");
+        await Assert.That(packages).Contains("<FlaUIVersion>5.0.0</FlaUIVersion>");
         await Assert.That(packages).Contains("MinVer\" Version=\"7.0.0");
         await Assert.That(packages).DoesNotContain("Nerdbank.GitVersioning");
         await Assert.That(buildProperties).Contains("<PackageReference Include=\"MinVer\" PrivateAssets=\"all\" />");
@@ -225,7 +274,7 @@ public sealed partial class ServerSurfaceTests
         await Assert.That(readme).Contains("images/ReadmeHero.png");
         await Assert.That(readme).Contains("<!-- mcp-name: io.github.chrispulman/uiinspect-mcp -->");
         await Assert.That(buildProperties).Contains("<PackageIcon>IconNuget.png</PackageIcon>");
-        await Assert.That(serverProject).Contains("<TargetFramework>net10.0</TargetFramework>");
+        await VerifyWindowsProjectTargetsAsync(serverProject, windowsProject);
         await Assert.That(serverProject).DoesNotContain("<PackageVersion>");
         await Assert.That(serverProject).Contains("<PackageReadmeFile>README.md</PackageReadmeFile>");
         await Assert.That(serverProject).Contains(@"skills\uiinspect\**\*.*");
@@ -237,13 +286,25 @@ public sealed partial class ServerSurfaceTests
         await Assert.That(skill).Contains("request consent again, attach a new UIA session");
         await Assert.That(skillMetadata).Contains("display_name: \"UIInspect\"");
         await Assert.That(skillMetadata).Contains("value: \"uiinspect-mcp\"");
-        await Assert.That(windowsProject).Contains("<TargetFramework>net10.0</TargetFramework>");
         await Assert.That(windowsProject).DoesNotContain("<UseWindowsForms>");
         await Assert.That(serverAssemblyInfo).Contains("SupportedOSPlatform(\"windows\")");
         await Assert.That(windowsAssemblyInfo).Contains("SupportedOSPlatform(\"windows\")");
         await Assert.That(File.Exists(Path.Combine(root, ImagesDirectoryName, "IconNuget.png"))).IsTrue();
         await Assert.That(File.Exists(Path.Combine(root, ImagesDirectoryName, "GitHubLogo.png"))).IsTrue();
         await Assert.That(File.Exists(Path.Combine(root, ImagesDirectoryName, "ReadmeHero.png"))).IsTrue();
+    }
+
+    /// <summary>Verifies that Windows-only projects use compatible TFMs without asset fallback.</summary>
+    /// <param name="serverProject">Server project source.</param>
+    /// <param name="windowsProject">Windows adapter project source.</param>
+    /// <returns>A task that verifies Windows project targets.</returns>
+    private static async Task VerifyWindowsProjectTargetsAsync(string serverProject, string windowsProject)
+    {
+        await Assert.That(serverProject).Contains("<TargetFramework>net10.0</TargetFramework>");
+        await Assert.That(serverProject).DoesNotContain("<AssetTargetFallback>");
+        await Assert.That(windowsProject).Contains("<TargetFramework>net10.0</TargetFramework>");
+        await Assert.That(windowsProject).DoesNotContain("<AssetTargetFallback>");
+        await Assert.That(windowsProject).Contains("<PackageDownload Include=\"FlaUI.UIA3\"");
     }
 
     /// <summary>Verifies that every literal README package coordinate uses the manifest version.</summary>

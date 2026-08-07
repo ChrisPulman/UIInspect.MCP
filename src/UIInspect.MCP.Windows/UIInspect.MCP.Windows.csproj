@@ -4,13 +4,24 @@
     <AssemblyName>UIInspect.MCP.Windows</AssemblyName>
     <RootNamespace>UIInspect.MCP.Windows</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <AssetTargetFallback>$(AssetTargetFallback);net8.0-windows7.0</AssetTargetFallback>
     <Description>FlaUI UIA3 adapter and trusted Windows consent prompt for UIInspect MCP.</Description>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="FlaUI.Core" />
-    <PackageReference Include="FlaUI.UIA3" />
+    <!--
+      PackAsTool rejects platform-qualified TFMs, while FlaUI 5.0 publishes its modern
+      binaries only for net8.0-windows7.0. Download FlaUI as path-only inputs and bind
+      those compatible assemblies explicitly so the Windows-only tool remains packable
+      without relying on NuGet AssetTargetFallback or suppressing NU1701.
+    -->
+    <PackageDownload Include="FlaUI.Core" Version="[$(FlaUIVersion)]" />
+    <PackageDownload Include="FlaUI.UIA3" Version="[$(FlaUIVersion)]" />
+    <PackageReference Include="Interop.UIAutomationClient" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="System.Management" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="FlaUI.Core" HintPath="$(NuGetPackageRoot)flaui.core\$(FlaUIVersion)\lib\net8.0-windows7.0\FlaUI.Core.dll" Private="true" />
+    <Reference Include="FlaUI.UIA3" HintPath="$(NuGetPackageRoot)flaui.uia3\$(FlaUIVersion)\lib\net8.0-windows7.0\FlaUI.UIA3.dll" Private="true" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\UIInspect.MCP.Core\UIInspect.MCP.Core.csproj" />

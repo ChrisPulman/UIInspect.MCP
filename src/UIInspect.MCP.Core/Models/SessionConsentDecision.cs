@@ -6,4 +6,5 @@ namespace UIInspect.MCP.Core.Models;
 /// <summary>Result of a server-session consent request.</summary>
 /// <param name="IsApproved">Whether the local user approved the retained capability ceiling.</param>
 /// <param name="RetryAfter">Retry delay when no prompt was shown because the new-prompt rate limit was reached.</param>
-public sealed record SessionConsentDecision(bool IsApproved, TimeSpan? RetryAfter);
+/// <param name="IsTerminal">Whether this decision should remain cached for the server session.</param>
+public sealed record SessionConsentDecision(bool IsApproved, TimeSpan? RetryAfter, bool IsTerminal = true);
