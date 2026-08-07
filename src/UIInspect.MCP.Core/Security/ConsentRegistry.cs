@@ -40,13 +40,49 @@ public sealed class ConsentRegistry
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(duration, TimeSpan.Zero);
 
         var now = _timeProvider.GetUtcNow();
+        return GrantUntil(
+            clientHash,
+            target,
+            capabilities,
+            now.Add(duration),
+            ConsentOrigin.ExplicitWindowsPrompt,
+            null);
+    }
+
+    /// <summary>Create a grant with a hard authority-owned expiry.</summary>
+    /// <param name="clientHash">Hashed client identity.</param>
+    /// <param name="target">Exact process instance.</param>
+    /// <param name="capabilities">Granted capabilities.</param>
+    /// <param name="expiresAtUtc">Hard expiry.</param>
+    /// <param name="origin">Authority that produced the grant.</param>
+    /// <param name="authorityId">Optional external authority identifier.</param>
+    /// <returns>Created grant.</returns>
+    public ConsentGrant GrantUntil(
+        string clientHash,
+        ProcessIdentity target,
+        UiCapability capabilities,
+        DateTimeOffset expiresAtUtc,
+        ConsentOrigin origin,
+        Guid? authorityId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(clientHash);
+        ArgumentNullException.ThrowIfNull(target);
+
+        var now = _timeProvider.GetUtcNow();
+        if (expiresAtUtc <= now)
+        {
+            throw new ArgumentOutOfRangeException(nameof(expiresAtUtc));
+        }
+
         var grant = new ConsentGrant(
             Guid.NewGuid(),
             clientHash,
             target,
             capabilities,
             now,
-            now.Add(duration));
+            expiresAtUtc,
+            origin,
+            authorityId);
         _ = _grants.TryAdd(grant.Id, grant);
         return grant;
     }
@@ -67,6 +103,29 @@ public sealed class ConsentRegistry
         {
             return FindActive(clientHash, target, capabilities)
                 ?? Grant(clientHash, target, capabilities, duration);
+        }
+    }
+
+    /// <summary>Return an active matching grant or atomically create one with an authority-owned expiry.</summary>
+    /// <param name="clientHash">Hashed client identity.</param>
+    /// <param name="target">Exact process instance.</param>
+    /// <param name="capabilities">Granted capabilities.</param>
+    /// <param name="expiresAtUtc">Hard expiry.</param>
+    /// <param name="origin">Authority that produced the grant.</param>
+    /// <param name="authorityId">Optional external authority identifier.</param>
+    /// <returns>The existing or newly created grant.</returns>
+    public ConsentGrant GrantOrGetActiveUntil(
+        string clientHash,
+        ProcessIdentity target,
+        UiCapability capabilities,
+        DateTimeOffset expiresAtUtc,
+        ConsentOrigin origin,
+        Guid? authorityId)
+    {
+        lock (_grantGate)
+        {
+            return FindActive(clientHash, target, capabilities)
+                ?? GrantUntil(clientHash, target, capabilities, expiresAtUtc, origin, authorityId);
         }
     }
 

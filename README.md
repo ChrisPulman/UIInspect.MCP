@@ -84,23 +84,34 @@ The MCP protocol owns stdout; server diagnostics are written to stderr.
 ## What the package provides
 
 - Top-level window discovery with process-instance identity and native window handles.
-- A trusted, server-owned Windows approval dialog shown at most once per client and exact target process instance during one server session.
+- A trusted, server-owned Windows approval dialog shown at most once per client and exact target process instance during one server session, with a bounded timeout that closes stale prompts.
+- Optional 1, 2, 5, 8, 12, or 24 hour unattended approval shared safely by concurrent UIInspect server processes in the current Windows user/session.
 - Attach by process ID with an optional native window handle.
 - Bounded, flattened UI Automation control-tree snapshots.
 - Opaque, generation-scoped element references with explanatory semantic paths.
 - Invoke, resolved click, ValuePattern set, SelectionItemPattern select, expand/collapse, and allowlisted logical-key actions.
 - Password-element redaction and no control-value collection during inspection.
-- Consent bound to the local stdio server principal, expiry and PID-reuse checks, rate limits, application-level append-only redacted JSONL auditing, and deterministic session cleanup.
+- Consent bound to the local stdio server instance or a trusted Windows-session approval broker, with expiry and PID-reuse checks, rate limits, application-level append-only redacted JSONL auditing, and deterministic session cleanup.
 
 The current package deliberately does not provide XAML source or visual trees, dependency properties, bindings, validation, DataContext or command diagnostics, hot reload, screenshots, OCR, overlays, recording/replay, arbitrary reflection, shell execution, generic property writes, or TCP transport.
 
 ## Consent and security
 
-UIInspect never treats an MCP request as user approval. The local user must approve the exact process instance and requested capabilities in a trusted Windows dialog before the server attaches. Repeated and concurrent requests reuse that server-session decision without opening another dialog. A denial is terminal for that client and process instance until the server restarts, and later capability expansion is denied rather than silently approved or prompted again.
+UIInspect never treats an agent name or ordinary MCP request as user approval. Stdio client metadata is self-asserted and cannot prove that the caller is Codex, Claude Code, or another trusted agent, so UIInspect does not provide an agent-name bypass. In normal mode, the local user approves the exact process instance and requested capabilities in a trusted Windows dialog before the server attaches. Repeated and concurrent requests reuse that server-session decision without opening another dialog. A denial is terminal for that client and process instance until the server restarts, and later capability expansion is denied rather than silently approved or prompted again.
 
 Inspection, interaction, and keyboard access are separate capabilities. Request only the minimum needed for the task. Grants are short-lived and bound to the local stdio server principal, exact process identity, Windows session, and approved capabilities. Tool parameters cannot supply or override that principal.
 
-For unattended tests, keep one MCP server process alive for the complete run, request every required capability during setup, approve the single trusted dialog, and reuse its grants and attached sessions.
+For unattended tests and multiple agent sessions, activate one fixed-duration approval from a trusted interactive terminal:
+
+```powershell
+uiinspect-mcp --authorize-unattended 8
+uiinspect-mcp --unattended-status
+uiinspect-mcp --revoke-unattended
+```
+
+Replace `8` with exactly `1`, `2`, `5`, `8`, `12`, or `24`. When invoking the NuGet package directly, append manager arguments to the existing `dnx` command after `--`, for example `-- --authorize-unattended 8`.
+
+The trusted dialog clearly approves all local UIInspect clients in the current Windows user and interactive session for Inspect, Interact, and Keyboard. The broker keeps the lease only in memory, serves concurrent agent sessions through current-user-only named pipes, and stops at expiry, revocation, process exit, logoff, or reboot. Each agent calls `uiinspect_get_unattended_approval`, then follows the normal consent and attach workflow; `uiinspect_request_consent` exchanges the broker lease for an exact-process grant without another dialog. Activation and extension are deliberately not MCP tools.
 
 Successful actions invalidate all current element references. Re-inspect before the next action so the server can semantically resolve the current UI rather than act on stale coordinates.
 
@@ -119,6 +130,7 @@ See the complete [security model](https://github.com/ChrisPulman/UIInspect.MCP/b
 | Tool | Purpose | Required access |
 |---|---|---|
 | `uiinspect_discover_windows` | List top-level UI Automation windows | Discovery |
+| `uiinspect_get_unattended_approval` | Report the current user/session approval window | Discovery |
 | `uiinspect_request_consent` | Show the trusted local approval dialog once per exact target and server session | Local user decision |
 | `uiinspect_attach` | Open an opaque session for a PID and optional HWND | Inspect |
 | `uiinspect_inspect_tree` | Return a bounded semantic snapshot | Inspect |
@@ -133,9 +145,9 @@ See the complete [security model](https://github.com/ChrisPulman/UIInspect.MCP/b
 
 ## Recommended workflow
 
-1. Call `uiinspect_discover_windows`.
+1. Call `uiinspect_get_unattended_approval` when an unattended window is expected, then call `uiinspect_discover_windows`.
 2. Identify the intended process and window using independently known application context.
-3. Call `uiinspect_request_consent` once with every capability required for the session. The local user must approve the exact process instance; repeats reuse the decision and cannot expand it.
+3. Call `uiinspect_request_consent` once with every capability required for the session. An active broker lease avoids a per-target dialog; otherwise the local user must approve the exact process instance. Repeats reuse the decision and cannot expand it.
 4. Call `uiinspect_attach`.
 5. Call `uiinspect_inspect_tree` with the smallest useful depth and node budget.
 6. Select an element using its automation ID, control type, accessible name, patterns, and semantic path.
@@ -146,7 +158,8 @@ See the complete [security model](https://github.com/ChrisPulman/UIInspect.MCP/b
 ## Recovery behavior
 
 - On `stale_element`, inspect again and use a newly returned element reference.
-- On `consent_expired`, call `uiinspect_request_consent`, then `uiinspect_attach`, then `uiinspect_inspect_tree`. The retained server-session approval renews the grant without showing another dialog.
+- On `unattended_approval_inactive`, ask the user to activate a window from a trusted terminal or continue with the ordinary per-target prompt. Do not loop on the status tool.
+- On `consent_expired`, call `uiinspect_get_unattended_approval` when unattended operation is expected, then call `uiinspect_request_consent`, `uiinspect_attach`, and `uiinspect_inspect_tree`. A still-active broker lease or retained explicit decision renews the exact-process grant without another dialog.
 - On `session_not_found`, attach again when consent remains active; otherwise request consent, attach, and inspect.
 - On `target_changed` or `target_unavailable`, rediscover the target; a new exact process identity requires its own consent decision.
 - On `rate_limited`, wait for `retryAfterMilliseconds` before retrying.
@@ -162,4 +175,4 @@ The NuGet package contains:
 - The recursively packaged `skills/uiinspect` skill, including `SKILL.md` and `agents/openai.yaml`.
 - This README and the detailed [MVP behavior and boundaries](https://github.com/ChrisPulman/UIInspect.MCP/blob/main/docs/mvp-design.md).
 
-The package uses `ModelContextProtocol` 2.0.0 and FlaUI 5.0 with UIA3.
+The package uses `ModelContextProtocol` 2.1.0 and FlaUI 5.0 with UIA3.

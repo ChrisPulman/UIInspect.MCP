@@ -8,4 +8,10 @@ namespace UIInspect.MCP.Core.Models;
 /// <param name="Target">Exact process instance.</param>
 /// <param name="Capabilities">Granted capabilities.</param>
 /// <param name="ExpiresAtUtc">Expiry.</param>
-public sealed record ConsentGrantInfo(Guid ConsentId, ProcessIdentity Target, UiCapability Capabilities, DateTimeOffset ExpiresAtUtc);
+/// <param name="Origin">Authority that produced the grant.</param>
+public sealed record ConsentGrantInfo(
+    Guid ConsentId,
+    ProcessIdentity Target,
+    UiCapability Capabilities,
+    DateTimeOffset ExpiresAtUtc,
+    ConsentOrigin Origin);

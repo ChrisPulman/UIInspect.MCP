@@ -28,6 +28,8 @@ The MVP deliberately does not return ValuePattern values, help text, arbitrary p
 
 Each attached UIA session owns one `UIA3Automation` instance and serializes inspection/actions through a session gate. Live COM-backed automation elements never cross the session boundary. Provider property reads use narrow safe fallbacks for unsupported, invalid, or unavailable properties.
 
+The optional unattended authority is a separate broker process scoped to one Windows user SID and interactive session. It owns an in-memory fixed-duration lease, exposes multiple current-user-only named-pipe listeners for concurrent agent sessions, and independently revalidates the exact target identity before every protected operation. MCP server processes cache only exact-process grants tied to the broker lease ID and hard expiry; broker loss or revocation invalidates them immediately.
+
 ## Test fixtures
 
 The WPF, WinForms, WinUI 3, Avalonia, and .NET MAUI Windows fixtures expose matching automation IDs:

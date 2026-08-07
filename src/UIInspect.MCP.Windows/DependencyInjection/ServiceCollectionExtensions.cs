@@ -42,6 +42,7 @@ public static class ServiceCollectionExtensions
             _ = services.AddSingleton(TimeProvider.System);
             _ = services.AddSingleton(resolvedOptions);
             _ = services.AddSingleton<ConsentRegistry>();
+            _ = services.AddSingleton<IUnattendedApprovalAuthorizer, WindowsUnattendedApprovalAuthorizer>();
             _ = services.AddSingleton<IOperationRateLimiter, FixedWindowRateLimiter>();
             _ = services.AddSingleton<IProcessIdentityProvider, WindowsProcessIdentityProvider>();
             _ = services.AddSingleton<IUserConsentPrompt, TrustedWindowsConsentPrompt>();
@@ -69,6 +70,7 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<IProcessIdentityProvider>(),
             provider.GetRequiredService<ISessionUserConsentPrompt>(),
             provider.GetRequiredService<ConsentRegistry>(),
+            provider.GetRequiredService<IUnattendedApprovalAuthorizer>(),
             provider.GetRequiredService<IOperationRateLimiter>(),
             provider.GetRequiredService<IAuditSink>(),
             provider.GetRequiredService<TimeProvider>());

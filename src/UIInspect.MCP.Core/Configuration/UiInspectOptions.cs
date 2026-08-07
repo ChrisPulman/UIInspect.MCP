@@ -9,8 +9,14 @@ public sealed class UiInspectOptions
     /// <summary>Default short-lived consent duration in minutes.</summary>
     private const double DefaultConsentDurationMinutes = 15;
 
+    /// <summary>Default time allowed for a trusted Windows consent prompt.</summary>
+    private const double DefaultConsentPromptTimeoutMinutes = 2;
+
     /// <summary>Gets or sets the short-lived consent duration.</summary>
     public TimeSpan ConsentDuration { get; set; } = TimeSpan.FromMinutes(DefaultConsentDurationMinutes);
+
+    /// <summary>Gets or sets the fail-closed deadline for a trusted Windows consent prompt.</summary>
+    public TimeSpan ConsentPromptTimeout { get; set; } = TimeSpan.FromMinutes(DefaultConsentPromptTimeoutMinutes);
 
     /// <summary>Gets or sets the maximum accepted inspection depth.</summary>
     public int MaximumTreeDepth { get; set; } = 12;

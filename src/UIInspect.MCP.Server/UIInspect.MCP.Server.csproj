@@ -12,7 +12,6 @@
     <PackageType>McpServer</PackageType>
     <ToolCommandName>uiinspect-mcp</ToolCommandName>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <AssetTargetFallback>$(AssetTargetFallback);net8.0-windows7.0</AssetTargetFallback>
   </PropertyGroup>
 
   <ItemGroup>

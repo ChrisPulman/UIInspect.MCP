@@ -35,6 +35,9 @@ public sealed class UiInspectServiceTests
     /// <summary>Expected expired-consent error code.</summary>
     private const string ConsentExpiredCode = "consent_expired";
 
+    /// <summary>Expected missing-consent error code.</summary>
+    private const string ConsentRequiredCode = "consent_required";
+
     /// <summary>Expected denied-consent error code.</summary>
     private const string ConsentDeniedCode = "consent_denied";
 
@@ -61,6 +64,21 @@ public sealed class UiInspectServiceTests
 
     /// <summary>One more than the permitted UI tree nodes.</summary>
     private const int TooManyTreeNodes = MaximumTreeNodes + 1;
+
+    /// <summary>Broker validations expected across grant, attach, two operations, and revocation detection.</summary>
+    private const int ExpectedUnattendedValidations = 5;
+
+    /// <summary>Broker validations expected from two independent server processes.</summary>
+    private const int ExpectedSharedServerValidations = 2;
+
+    /// <summary>Short prompt deadline used to verify unattended retry recovery.</summary>
+    private const int PromptTimeoutMilliseconds = 25;
+
+    /// <summary>Delay that allows a cancelled caller's shared prompt to reach its own deadline.</summary>
+    private const int PromptTimeoutRecoveryDelayMilliseconds = 50;
+
+    /// <summary>Approval window used for unattended service tests.</summary>
+    private const int UnattendedApprovalHours = 8;
 
     /// <summary>The complete happy path executes every MVP operation and audits it.</summary>
     /// <returns>A task that completes when the assertion sequence succeeds.</returns>
@@ -190,7 +208,7 @@ public sealed class UiInspectServiceTests
 
         await Assert.That(first.Error!.Code).IsEqualTo(ConsentDeniedCode);
         await Assert.That(repeated.Error!.Code).IsEqualTo(ConsentDeniedCode);
-        await Assert.That(attach.Error!.Code).IsEqualTo("consent_required");
+        await Assert.That(attach.Error!.Code).IsEqualTo(ConsentRequiredCode);
         await Assert.That(harness.Prompt.Requests.Count).IsEqualTo(1);
         await Assert.That(harness.RateLimiter.Buckets.Count).IsEqualTo(1);
     }
@@ -256,6 +274,306 @@ public sealed class UiInspectServiceTests
         await Assert.That(result.Success).IsTrue();
         await Assert.That(harness.Prompt.Requests.Count).IsEqualTo(1);
         await Assert.That(harness.RateLimiter.Buckets.Count).IsEqualTo(1);
+    }
+
+    /// <summary>A stale native prompt times out, releases its decision key, and permits a clean retry.</summary>
+    /// <returns>A task that completes when timeout recovery is verified.</returns>
+    [Test]
+    public async Task Timed_out_consent_prompt_can_be_retried()
+    {
+        await using var harness = new ServiceHarness(
+            new UiInspectOptions { ConsentPromptTimeout = TimeSpan.FromMilliseconds(PromptTimeoutMilliseconds), });
+        harness.Prompt.DecisionSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var timedOut = await harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            false,
+            false,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+        harness.Prompt.DecisionSource = null;
+        var retried = await harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            false,
+            false,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+
+        await Assert.That(timedOut.Error!.Code).IsEqualTo(ConsentDeniedCode);
+        await Assert.That(retried.Success).IsTrue();
+        await Assert.That(harness.Prompt.Requests.Count).IsEqualTo(ExpectedSharedServerValidations);
+        await Assert.That(harness.RateLimiter.Buckets.Count).IsEqualTo(ExpectedSharedServerValidations);
+    }
+
+    /// <summary>A prompt timeout releases its key even when every original caller cancelled its wait.</summary>
+    /// <returns>A task that completes when detached timeout recovery is verified.</returns>
+    [Test]
+    public async Task Detached_timed_out_prompt_can_be_retried_immediately()
+    {
+        await using var harness = new ServiceHarness(
+            new UiInspectOptions { ConsentPromptTimeout = TimeSpan.FromMilliseconds(PromptTimeoutMilliseconds), });
+        harness.Prompt.DecisionSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancellation = new CancellationTokenSource();
+        var detached = harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            false,
+            false,
+            ServiceHarness.ClientId,
+            cancellation.Token).AsTask();
+        await cancellation.CancelAsync();
+        await Assert.That(async () => { _ = await detached; }).Throws<OperationCanceledException>();
+
+        await Task.Delay(TimeSpan.FromMilliseconds(PromptTimeoutRecoveryDelayMilliseconds));
+        harness.Prompt.DecisionSource = null;
+        var retried = await harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            false,
+            false,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+
+        await Assert.That(retried.Success).IsTrue();
+        await Assert.That(harness.Prompt.Requests.Count).IsEqualTo(ExpectedSharedServerValidations);
+    }
+
+    /// <summary>An active user/session lease suppresses prompts and is revalidated for every protected operation.</summary>
+    /// <returns>A task that completes when lease grant and revocation behavior is verified.</returns>
+    [Test]
+    public async Task Unattended_approval_is_revalidated_for_every_operation()
+    {
+        await using var harness = new ServiceHarness();
+        var lease = new UnattendedApprovalLease(
+            Guid.NewGuid(),
+            UiCapability.Inspect | UiCapability.Interact | UiCapability.Keyboard,
+            harness.Time.UtcNow,
+            harness.Time.UtcNow.AddHours(UnattendedApprovalHours));
+        harness.UnattendedApprovals.Lease = lease;
+
+        var consent = await harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            true,
+            true,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+        var attach = await harness.Service.AttachAsync(
+            harness.Target.ProcessId,
+            null,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+        var sessionId = attach.Data!.SessionId;
+        var inspect = await harness.Service.InspectAsync(
+            sessionId,
+            InspectionDepth,
+            InspectionNodeLimit,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+        var invoke = await harness.Service.InvokeAsync(
+            sessionId,
+            "e",
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+
+        harness.UnattendedApprovals.IsValid = false;
+        var revoked = await harness.Service.InspectAsync(
+            sessionId,
+            InspectionDepth,
+            InspectionNodeLimit,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+
+        await Assert.That(consent.Data!.Origin).IsEqualTo(ConsentOrigin.UnattendedApprovalLease);
+        await Assert.That(consent.Data.ExpiresAtUtc).IsEqualTo(lease.ExpiresAtUtc);
+        await Assert.That(harness.Prompt.Requests.Count).IsEqualTo(0);
+        await Assert.That(attach.Success).IsTrue();
+        await Assert.That(inspect.Success).IsTrue();
+        await Assert.That(invoke.Success).IsTrue();
+        await Assert.That(revoked.Error!.Code).IsEqualTo(ConsentExpiredCode);
+        await Assert.That(harness.Session.DisposeCalls).IsEqualTo(1);
+        await Assert.That(harness.UnattendedApprovals.Validations.Count).IsEqualTo(ExpectedUnattendedValidations);
+    }
+
+    /// <summary>A lease that lacks requested capabilities falls back to the trusted per-target prompt.</summary>
+    /// <returns>A task that completes when capability fallback is verified.</returns>
+    [Test]
+    public async Task Unattended_approval_never_expands_its_capability_ceiling()
+    {
+        await using var harness = new ServiceHarness();
+        harness.UnattendedApprovals.Lease = new(
+            Guid.NewGuid(),
+            UiCapability.Inspect,
+            harness.Time.UtcNow,
+            harness.Time.UtcNow.AddHours(1));
+
+        var consent = await harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            true,
+            false,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+
+        await Assert.That(consent.Success).IsTrue();
+        await Assert.That(consent.Data!.Origin).IsEqualTo(ConsentOrigin.ExplicitWindowsPrompt);
+        await Assert.That(harness.Prompt.Requests.Count).IsEqualTo(1);
+        await Assert.That(harness.UnattendedApprovals.Validations.Count).IsEqualTo(0);
+    }
+
+    /// <summary>A locally cached broker grant is removed when its external authority becomes invalid.</summary>
+    /// <returns>A task that completes when invalid authority reuse is verified.</returns>
+    [Test]
+    public async Task Invalid_unattended_authority_revokes_cached_grants()
+    {
+        await using var harness = new ServiceHarness();
+        harness.UnattendedApprovals.Lease = new(
+            Guid.NewGuid(),
+            UiCapability.Inspect,
+            harness.Time.UtcNow,
+            harness.Time.UtcNow.AddHours(UnattendedApprovalHours));
+        var initial = await harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            false,
+            false,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+
+        harness.UnattendedApprovals.IsValid = false;
+        var repeated = await harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            false,
+            false,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+        var attach = await harness.Service.AttachAsync(
+            harness.Target.ProcessId,
+            null,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+
+        await Assert.That(initial.Success).IsTrue();
+        await Assert.That(repeated.Error!.Code).IsEqualTo(TargetChangedCode);
+        await Assert.That(attach.Error!.Code).IsEqualTo(ConsentRequiredCode);
+        await Assert.That(harness.Consent.FindActive(
+            AuditHash.Compute(ServiceHarness.ClientId),
+            harness.Target,
+            UiCapability.Inspect)).IsNull();
+    }
+
+    /// <summary>An unattended-origin grant without a broker authority identifier is never accepted.</summary>
+    /// <returns>A task that completes when malformed grant rejection is verified.</returns>
+    [Test]
+    public async Task Unattended_grant_requires_an_authority_identifier()
+    {
+        await using var harness = new ServiceHarness();
+        _ = harness.Consent.GrantUntil(
+            AuditHash.Compute(ServiceHarness.ClientId),
+            harness.Target,
+            UiCapability.Inspect,
+            harness.Time.UtcNow.AddHours(UnattendedApprovalHours),
+            ConsentOrigin.UnattendedApprovalLease,
+            null);
+
+        var attach = await harness.Service.AttachAsync(
+            harness.Target.ProcessId,
+            null,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+
+        await Assert.That(attach.Error!.Code).IsEqualTo(ConsentRequiredCode);
+        await Assert.That(harness.Consent.FindActive(
+            AuditHash.Compute(ServiceHarness.ClientId),
+            harness.Target,
+            UiCapability.Inspect)).IsNull();
+    }
+
+    /// <summary>Independent server sessions can safely consume one broker-owned approval concurrently.</summary>
+    /// <returns>A task that completes when shared broker semantics are verified.</returns>
+    [Test]
+    public async Task Multiple_server_sessions_share_one_unattended_approval()
+    {
+        var authority = new FakeUnattendedApprovalAuthorizer
+        {
+            Lease = new(
+                Guid.NewGuid(),
+                UiCapability.Inspect | UiCapability.Interact | UiCapability.Keyboard,
+                DateTimeOffset.Parse("2026-07-27T12:00:00Z"),
+                DateTimeOffset.Parse("2026-07-27T20:00:00Z")),
+        };
+        await using var first = new ServiceHarness(unattendedApprovals: authority);
+        await using var second = new ServiceHarness(unattendedApprovals: authority);
+
+        var requests = new[]
+        {
+            first.Service.RequestConsentAsync(
+                first.Target.ProcessId,
+                true,
+                true,
+                ServiceHarness.ClientId,
+                CancellationToken.None).AsTask(),
+            second.Service.RequestConsentAsync(
+                second.Target.ProcessId,
+                true,
+                true,
+                ServiceHarness.ClientId,
+                CancellationToken.None).AsTask(),
+        };
+        var results = await Task.WhenAll(requests);
+
+        await Assert.That(results[0].Data!.Origin).IsEqualTo(ConsentOrigin.UnattendedApprovalLease);
+        await Assert.That(results[1].Data!.Origin).IsEqualTo(ConsentOrigin.UnattendedApprovalLease);
+        await Assert.That(first.Prompt.Requests.Count).IsEqualTo(0);
+        await Assert.That(second.Prompt.Requests.Count).IsEqualTo(0);
+        await Assert.That(authority.Validations.Count).IsEqualTo(ExpectedSharedServerValidations);
+    }
+
+    /// <summary>An already-expired broker response falls back to the bounded per-target prompt.</summary>
+    /// <returns>A task that completes when expiry-race recovery is verified.</returns>
+    [Test]
+    public async Task Expired_unattended_approval_falls_back_to_trusted_prompt()
+    {
+        await using var harness = new ServiceHarness();
+        harness.UnattendedApprovals.Lease = new(
+            Guid.NewGuid(),
+            UiCapability.Inspect,
+            harness.Time.UtcNow.AddHours(-UnattendedApprovalHours),
+            harness.Time.UtcNow);
+
+        var result = await harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            false,
+            false,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+
+        await Assert.That(result.Success).IsTrue();
+        await Assert.That(result.Data!.Origin).IsEqualTo(ConsentOrigin.ExplicitWindowsPrompt);
+        await Assert.That(harness.Prompt.Requests.Count).IsEqualTo(1);
+        await Assert.That(harness.UnattendedApprovals.Validations.Count).IsEqualTo(0);
+    }
+
+    /// <summary>A lease expiring during broker exchange also falls back without surfacing an exception.</summary>
+    /// <returns>A task that completes when the narrow expiry race is verified.</returns>
+    [Test]
+    public async Task Unattended_approval_expiry_race_falls_back_to_trusted_prompt()
+    {
+        await using var harness = new ServiceHarness();
+        harness.UnattendedApprovals.Lease = new(
+            Guid.NewGuid(),
+            UiCapability.Inspect,
+            harness.Time.UtcNow,
+            harness.Time.UtcNow.AddHours(UnattendedApprovalHours));
+        harness.UnattendedApprovals.OnValidate = () =>
+            harness.Time.Advance(TimeSpan.FromHours(UnattendedApprovalHours));
+
+        var result = await harness.Service.RequestConsentAsync(
+            harness.Target.ProcessId,
+            false,
+            false,
+            ServiceHarness.ClientId,
+            CancellationToken.None);
+
+        await Assert.That(result.Success).IsTrue();
+        await Assert.That(result.Data!.Origin).IsEqualTo(ConsentOrigin.ExplicitWindowsPrompt);
+        await Assert.That(harness.Prompt.Requests.Count).IsEqualTo(1);
+        await Assert.That(harness.UnattendedApprovals.Validations.Count).IsEqualTo(1);
     }
 
     /// <summary>Consent reuse remains scoped to one client and one exact process identity.</summary>
@@ -413,7 +731,7 @@ public sealed class UiInspectServiceTests
             CancellationToken.None);
 
         await Assert.That(unavailable.Error!.Code).IsEqualTo("target_unavailable");
-        await Assert.That(unconsented.Error!.Code).IsEqualTo("consent_required");
+        await Assert.That(unconsented.Error!.Code).IsEqualTo(ConsentRequiredCode);
         await Assert.That(changed.Error!.Code).IsEqualTo(TargetChangedCode);
         await Assert.That(harness.Backend.Session.DisposeCalls).IsEqualTo(1);
     }
@@ -541,6 +859,7 @@ public sealed class UiInspectServiceTests
                 harness.Processes,
                 harness.SessionPrompt,
                 harness.Consent,
+                harness.UnattendedApprovals,
                 harness.RateLimiter,
                 harness.Audit,
                 harness.Time);
@@ -553,6 +872,7 @@ public sealed class UiInspectServiceTests
         await Assert.That(() => new UiInspectService(CreateDependencies() with { Processes = null! }, harness.Options)).Throws<ArgumentNullException>();
         await Assert.That(() => new UiInspectService(CreateDependencies() with { ConsentPrompt = null! }, harness.Options)).Throws<ArgumentNullException>();
         await Assert.That(() => new UiInspectService(CreateDependencies() with { ConsentRegistry = null! }, harness.Options)).Throws<ArgumentNullException>();
+        await Assert.That(() => new UiInspectService(CreateDependencies() with { UnattendedApprovals = null! }, harness.Options)).Throws<ArgumentNullException>();
         await Assert.That(() => new UiInspectService(CreateDependencies() with { RateLimiter = null! }, harness.Options)).Throws<ArgumentNullException>();
         await Assert.That(() => new UiInspectService(CreateDependencies() with { AuditSink = null! }, harness.Options)).Throws<ArgumentNullException>();
         await Assert.That(() => new UiInspectService(CreateDependencies() with { TimeProvider = null! }, harness.Options)).Throws<ArgumentNullException>();
@@ -561,6 +881,7 @@ public sealed class UiInspectServiceTests
         var invalidOptions = new[]
         {
             new UiInspectOptions { ConsentDuration = TimeSpan.Zero },
+            new UiInspectOptions { ConsentPromptTimeout = TimeSpan.Zero },
             new UiInspectOptions { MaximumTreeDepth = -1 },
             new UiInspectOptions { MaximumTreeNodes = 0 },
             new UiInspectOptions { DiscoveryRatePerMinute = 0 },
