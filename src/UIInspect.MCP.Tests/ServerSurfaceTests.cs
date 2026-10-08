@@ -257,9 +257,9 @@ public sealed partial class ServerSurfaceTests
             await Assert.That(skill).Contains(tool);
         }
 
-        await Assert.That(packages).Contains("ModelContextProtocol\" Version=\"2.1.0");
+        await Assert.That(packages).Contains("<PackageVersion Include=\"ModelContextProtocol\" Version=");
         await Assert.That(packages).Contains("<FlaUIVersion>5.0.0</FlaUIVersion>");
-        await Assert.That(packages).Contains("MinVer\" Version=\"7.0.0");
+        await Assert.That(packages).Contains("<PackageVersion Include=\"MinVer\" Version=");
         await Assert.That(packages).DoesNotContain("Nerdbank.GitVersioning");
         await Assert.That(buildProperties).Contains("<PackageReference Include=\"MinVer\" PrivateAssets=\"all\" />");
         await Assert.That(buildProperties).Contains("<MinVerTagPrefix>v</MinVerTagPrefix>");

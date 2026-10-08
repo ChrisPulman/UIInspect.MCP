@@ -72,6 +72,9 @@ public sealed class UiInspectService : IAsyncDisposable
     /// <summary>Consent-denied audit event type.</summary>
     private const string ConsentDeniedEvent = "consent_denied";
 
+    /// <summary>Consent-granted audit event type.</summary>
+    private const string ConsentGrantedEvent = "consent_granted";
+
     /// <summary>Time range used by all local fixed-window rate limits.</summary>
     private static readonly TimeSpan RateWindow = TimeSpan.FromMinutes(1);
 
@@ -95,6 +98,9 @@ public sealed class UiInspectService : IAsyncDisposable
 
     /// <summary>Provides response bounds and safety limits.</summary>
     private readonly UiInspectOptions _options;
+
+    /// <summary>Immutable startup authorization; runtime option mutation cannot enable unrestricted access.</summary>
+    private readonly bool _unrestricted;
 
     /// <summary>Resolves target process instances.</summary>
     private readonly IProcessIdentityProvider _processes;
@@ -120,6 +126,7 @@ public sealed class UiInspectService : IAsyncDisposable
         _auditSink = dependencies.AuditSink ?? throw new ArgumentNullException(nameof(dependencies.AuditSink));
         _timeProvider = dependencies.TimeProvider ?? throw new ArgumentNullException(nameof(dependencies.TimeProvider));
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _unrestricted = options.Unrestricted;
         ValidateOptions(options);
     }
 
@@ -159,6 +166,13 @@ public sealed class UiInspectService : IAsyncDisposable
             return UiResult<ConsentGrantInfo>.Fail(TargetUnavailableCode, "The target process is unavailable or inaccessible.");
         }
 
+        if (_unrestricted)
+        {
+            var unrestrictedGrant = GrantUnrestricted(clientHash, target);
+            await AuditAsync(ConsentGrantedEvent, AllowedOutcome, clientHash, target, RequestConsentOperation, "unrestricted_startup", cancellationToken).ConfigureAwait(false);
+            return UiResult<ConsentGrantInfo>.Ok(new(unrestrictedGrant.Id, target, unrestrictedGrant.Capabilities, unrestrictedGrant.ExpiresAtUtc, unrestrictedGrant.Origin));
+        }
+
         var capabilities = BuildCapabilities(allowActions, allowKeyboard);
         var reused = await TryReuseConsentAsync(clientHash, target, capabilities, cancellationToken).ConfigureAwait(false);
         if (reused is not null)
@@ -196,7 +210,7 @@ public sealed class UiInspectService : IAsyncDisposable
         }
 
         var grant = _consentRegistry.GrantOrGetActive(clientHash, target, capabilities, _options.ConsentDuration);
-        await AuditAsync("consent_granted", AllowedOutcome, clientHash, target, RequestConsentOperation, null, cancellationToken).ConfigureAwait(false);
+        await AuditAsync(ConsentGrantedEvent, AllowedOutcome, clientHash, target, RequestConsentOperation, null, cancellationToken).ConfigureAwait(false);
         return UiResult<ConsentGrantInfo>.Ok(
             new(grant.Id, grant.Target, grant.Capabilities, grant.ExpiresAtUtc, grant.Origin));
     }
@@ -217,7 +231,9 @@ public sealed class UiInspectService : IAsyncDisposable
             return UiResult<AutomationSessionInfo>.Fail(TargetUnavailableCode, "The target process is unavailable or inaccessible.");
         }
 
-        var grant = _consentRegistry.FindActive(clientHash, target, UiCapability.Inspect);
+        var grant = _unrestricted
+            ? GrantUnrestricted(clientHash, target)
+            : _consentRegistry.FindActive(clientHash, target, UiCapability.Inspect);
         if (grant is null
             || !await IsGrantAuthorityActiveAsync(grant, UiCapability.Inspect, cancellationToken).ConfigureAwait(false))
         {
@@ -646,6 +662,11 @@ public sealed class UiInspectService : IAsyncDisposable
         UiCapability requiredCapabilities,
         CancellationToken cancellationToken)
     {
+        if (grant.Origin == ConsentOrigin.UnrestrictedStartup)
+        {
+            return ValueTask.FromResult(_unrestricted);
+        }
+
         if (grant.Origin == ConsentOrigin.ExplicitWindowsPrompt)
         {
             return ValueTask.FromResult(true);
@@ -662,9 +683,27 @@ public sealed class UiInspectService : IAsyncDisposable
     /// <returns>Retry delay, or null when the operation is permitted.</returns>
     private TimeSpan? CheckRate(string bucket, int permits)
     {
+        if (_unrestricted)
+        {
+            return null;
+        }
+
         var decision = _rateLimiter.TryAcquire(bucket, permits, RateWindow);
         return decision.IsAllowed ? null : decision.RetryAfter;
     }
+
+    /// <summary>Create or reuse startup-authorized access scoped to this client and exact process instance.</summary>
+    /// <param name="clientHash">Hashed client identity.</param>
+    /// <param name="target">Exact target process instance.</param>
+    /// <returns>The unrestricted grant.</returns>
+    private ConsentGrant GrantUnrestricted(string clientHash, ProcessIdentity target) =>
+        _consentRegistry.GrantOrGetActiveUntil(
+            clientHash,
+            target,
+            UiCapability.Inspect | UiCapability.Interact | UiCapability.Keyboard,
+            DateTimeOffset.MaxValue,
+            ConsentOrigin.UnrestrictedStartup,
+            null);
 
     /// <summary>Writes a redacted audit event.</summary>
     /// <param name="eventType">Audit event type.</param>

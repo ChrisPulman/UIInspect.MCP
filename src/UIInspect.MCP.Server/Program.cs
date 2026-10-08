@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
+using UIInspect.MCP.Core.Configuration;
 using UIInspect.MCP.Core.Security;
 using UIInspect.MCP.Server.Tools;
 using UIInspect.MCP.Windows.DependencyInjection;
@@ -30,11 +31,22 @@ public static class Program
     /// <returns>Configured host.</returns>
     public static IHost CreateHost(string[] args)
     {
-        var builder = Host.CreateApplicationBuilder(args);
+        var unrestricted = args.Contains("--unrestricted", StringComparer.Ordinal)
+            || string.Equals(Environment.GetEnvironmentVariable("UIINSPECT_UNRESTRICTED"), "true", StringComparison.OrdinalIgnoreCase);
+        var hostArguments = new List<string>(args.Length);
+        foreach (var argument in args)
+        {
+            if (!string.Equals(argument, "--unrestricted", StringComparison.Ordinal))
+            {
+                hostArguments.Add(argument);
+            }
+        }
+
+        var builder = Host.CreateApplicationBuilder(hostArguments.ToArray());
         _ = builder.Logging.AddConsole(static options => options.LogToStandardErrorThreshold = LogLevel.Trace);
 
         var auditPath = Environment.GetEnvironmentVariable("UIINSPECT_AUDIT_PATH");
-        _ = builder.Services.AddWindowsUiInspect(null, auditPath);
+        _ = builder.Services.AddWindowsUiInspect(new UiInspectOptions { Unrestricted = unrestricted }, auditPath);
         _ = builder.Services
             .AddMcpServer(
                 static options => options.ServerInfo = new Implementation
@@ -42,7 +54,7 @@ public static class Program
                     Name = "uiinspect-mcp",
                     Version = typeof(Program).Assembly.GetName().Version!.ToString(),
                     Title = "UIInspect MCP Server",
-                    Description = "Consent-gated semantic Windows UI Automation inspection and action tools.",
+                    Description = "Configurable semantic Windows UI Automation with server-owner-configured approval policy.",
                 })
             .WithStdioServerTransport()
             .WithTools<UiInspectTools>();

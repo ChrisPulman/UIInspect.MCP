@@ -42,7 +42,15 @@ public static class ServiceCollectionExtensions
             _ = services.AddSingleton(TimeProvider.System);
             _ = services.AddSingleton(resolvedOptions);
             _ = services.AddSingleton<ConsentRegistry>();
-            _ = services.AddSingleton<IUnattendedApprovalAuthorizer, WindowsUnattendedApprovalAuthorizer>();
+            if (resolvedOptions.Unrestricted)
+            {
+                _ = services.AddSingleton<IUnattendedApprovalAuthorizer, UnrestrictedStartupAuthorizer>();
+            }
+            else
+            {
+                _ = services.AddSingleton<IUnattendedApprovalAuthorizer, WindowsUnattendedApprovalAuthorizer>();
+            }
+
             _ = services.AddSingleton<IOperationRateLimiter, FixedWindowRateLimiter>();
             _ = services.AddSingleton<IProcessIdentityProvider, WindowsProcessIdentityProvider>();
             _ = services.AddSingleton<IUserConsentPrompt, TrustedWindowsConsentPrompt>();

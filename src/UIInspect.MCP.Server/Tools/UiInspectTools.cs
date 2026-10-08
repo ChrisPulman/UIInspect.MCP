@@ -57,7 +57,7 @@ public sealed class UiInspectTools
     /// <param name="cancellationToken">Request cancellation token.</param>
     /// <returns>A serialized approval status.</returns>
     [McpServerTool(Name = "uiinspect_get_unattended_approval")]
-    [Description("Report the current Windows user/session unattended approval window. Activate or revoke it only through the trusted uiinspect-mcp manager commands.")]
+    [Description("Report unattended authorization. Startup --unrestricted lasts for this server lifetime; otherwise a Windows approval lease is required. This tool cannot enable authorization.")]
     public static async Task<string> GetUnattendedApprovalAsync(
         IUnattendedApprovalAuthorizer authorizer,
         CancellationToken cancellationToken)
@@ -102,7 +102,7 @@ public sealed class UiInspectTools
     /// <param name="cancellationToken">Request cancellation token supplied by the MCP transport.</param>
     /// <returns>A serialized consent result.</returns>
     [McpServerTool(Name = "uiinspect_request_consent")]
-    [Description("Show one trusted Windows approval dialog per exact process and server session. Repeated requests reuse the decision; capability expansion is denied without another dialog.")]
+    [Description("Request access for an exact process instance. Startup --unrestricted mode grants all capabilities immediately without a dialog; otherwise Windows approval policy applies.")]
     public static async Task<string> RequestConsentAsync(
         UiInspectService service,
         [Description("Target Windows process ID.")] int processId,

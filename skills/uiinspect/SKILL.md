@@ -9,6 +9,8 @@ Prefer semantic UI Automation over pixel coordinates. Keep each attached session
 
 ## Workflow
 
+When the server owner has configured `--unrestricted` or `UIINSPECT_UNRESTRICTED=true`, discover and attach directly. All capabilities are authorized for the server lifetime, with no consent dialog, broker IPC, expiry or operation rate limit. `uiinspect_get_unattended_approval` reports an expiry of `DateTimeOffset.MaxValue`. Skip the consent request in step 4 in this mode. This configuration is available only at server startup; no MCP tool enables it. Client-host approval prompts remain controlled by the host.
+
 1. When unattended approval is expected, call `uiinspect_get_unattended_approval`, then call `uiinspect_discover_windows`.
 2. Match the intended PID and optional HWND using independently known application context. Treat a restarted process as a different target even when its PID is reused.
 3. Decide the complete capability set before requesting consent:
@@ -25,6 +27,8 @@ Prefer semantic UI Automation over pixel coordinates. Keep each attached session
 
 ## Consent lifecycle
 
+The following prompt and expiry rules apply to normal startup. Unrestricted startup grants all capabilities automatically on attach while retaining exact process identity and client session ownership checks.
+
 - The trusted dialog appears at most once per local MCP client and exact process identity during one MCP server process lifetime.
 - Concurrent and repeated consent calls share the same in-flight or completed decision. Cancelling one request only stops that caller's wait; it does not close the native dialog. A retry joins the same decision and cannot open another dialog.
 - Approval and denial are retained until the MCP server exits. Closing an attached UIA session or allowing a short-lived grant to expire does not cause another prompt; an approved decision can issue a fresh grant.
@@ -36,7 +40,7 @@ Prefer semantic UI Automation over pixel coordinates. Keep each attached session
 ## Unattended and multi-agent tests
 
 - The MCP transport cannot authenticate a caller merely because it claims to be Codex, Claude Code, or another agent. Never treat an agent name as approval.
-- Ask the user to run `uiinspect-mcp --authorize-unattended <hours>` in a trusted interactive terminal and approve the Windows dialog. Valid values are exactly `1`, `2`, `5`, `8`, `12`, and `24`.
+- For a server already configured for unrestricted startup, attach directly without asking for approval. Otherwise the owner may use `uiinspect-mcp --authorize-unattended <hours>` and approve the Windows dialog. Valid values are exactly `1`, `2`, `5`, `8`, `12`, and `24`.
 - Confirm activation with `uiinspect_get_unattended_approval`. This status tool cannot create, extend, or revoke a lease.
 - Multiple agent sessions can use the same lease. Each must independently discover, request consent for the exact target and full capability set, attach, inspect, and later close its own session.
 - The user can inspect or revoke the window with `uiinspect-mcp --unattended-status` and `uiinspect-mcp --revoke-unattended`. Do not attempt to invoke private broker mode directly.

@@ -205,6 +205,7 @@ public sealed class WindowsUiaIntegrationTests
             CancellationToken.None);
         await Assert.That(attached.Target).IsEqualTo(identity);
         await Assert.That(attached.WindowHandle).IsEqualTo(handle.ToInt64());
+        await WaitForControlsAsync(attached, timeProvider);
         await AssertSemanticTreeAsync(attached, providerReportsPasswords);
 
         if (exerciseWpfPatterns)
@@ -220,6 +221,30 @@ public sealed class WindowsUiaIntegrationTests
         }
 
         await AssertDisposedSessionAsync(attached);
+    }
+
+    /// <summary>Waits for asynchronous framework content initialization after the native window exists.</summary>
+    /// <param name="attached">The active UIA attachment.</param>
+    /// <param name="timeProvider">The polling clock.</param>
+    /// <returns>Completion when the expected controls exist.</returns>
+    private static async Task WaitForControlsAsync(IUiAutomationSession attached, TimeProvider timeProvider)
+    {
+        var timestamp = timeProvider.GetTimestamp();
+        using var timer = new PeriodicTimer(PollingInterval, timeProvider);
+        while (timeProvider.GetElapsedTime(timestamp) < FixtureStartupTimeout)
+        {
+            var snapshot = await SnapshotAsync(attached);
+            if (ContainsAutomationId(snapshot, InvokeButtonId)
+                && ContainsAutomationId(snapshot, ValueTextBoxId)
+                && ContainsAutomationId(snapshot, PasswordBoxId))
+            {
+                return;
+            }
+
+            _ = await timer.WaitForNextTickAsync();
+        }
+
+        throw new TimeoutException("Fixture window exists but its semantic controls did not initialize.");
     }
 
     /// <summary>Validates that semantic inspection retains IDs and protects password text.</summary>

@@ -27,6 +27,48 @@ internal static class ElementMatching
             : string.Equals(element.ClassName, expected.ClassName, StringComparison.Ordinal);
     }
 
+    /// <summary>Builds sibling selectors in linear time, preserving all fallback matching rules.</summary>
+    /// <param name="siblings">Sibling identities in provider order.</param>
+    /// <returns>Selectors with ordinals among all prior semantic matches.</returns>
+    internal static ElementSelector[] CreateSelectors(IReadOnlyList<ElementIdentity> siblings)
+    {
+        var counts = new Dictionary<(string ControlType, string Kind, string Value), int>();
+        var selectors = new ElementSelector[siblings.Count];
+        for (var index = 0; index < siblings.Count; index++)
+        {
+            var identity = siblings[index];
+            var kind = nameof(ElementIdentity.ClassName);
+            var value = identity.ClassName;
+            if (!string.IsNullOrEmpty(identity.AutomationId))
+            {
+                kind = nameof(ElementIdentity.AutomationId);
+                value = identity.AutomationId;
+            }
+            else if (!string.IsNullOrEmpty(identity.Name))
+            {
+                kind = nameof(ElementIdentity.Name);
+                value = identity.Name;
+            }
+
+            _ = counts.TryGetValue((identity.ControlType, kind, value), out var ordinal);
+            selectors[index] = new(identity.ControlType, identity.AutomationId, identity.Name, identity.ClassName, ordinal);
+
+            // Name and class fallbacks also match earlier siblings that have automation IDs.
+            Increment(nameof(ElementIdentity.AutomationId), identity.AutomationId);
+            Increment(nameof(ElementIdentity.Name), identity.Name);
+            Increment(nameof(ElementIdentity.ClassName), identity.ClassName);
+
+            void Increment(string keyKind, string keyValue)
+            {
+                var key = (identity.ControlType, keyKind, keyValue);
+                _ = counts.TryGetValue(key, out var count);
+                counts[key] = count + 1;
+            }
+        }
+
+        return selectors;
+    }
+
     /// <summary>Counts semantically matching siblings preceding a selected position.</summary>
     /// <param name="siblings">Sibling identities.</param>
     /// <param name="index">Selected sibling position.</param>

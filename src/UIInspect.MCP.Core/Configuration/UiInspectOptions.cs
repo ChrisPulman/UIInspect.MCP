@@ -12,6 +12,9 @@ public sealed class UiInspectOptions
     /// <summary>Default time allowed for a trusted Windows consent prompt.</summary>
     private const double DefaultConsentPromptTimeoutMinutes = 2;
 
+    /// <summary>Gets or sets whether the server owner enabled prompt-free, unlimited-duration access at startup.</summary>
+    public bool Unrestricted { get; set; }
+
     /// <summary>Gets or sets the short-lived consent duration.</summary>
     public TimeSpan ConsentDuration { get; set; } = TimeSpan.FromMinutes(DefaultConsentDurationMinutes);
 
