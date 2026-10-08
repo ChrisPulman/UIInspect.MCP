@@ -1,5 +1,13 @@
 # Release package signing
 
+## Release versioning
+
+The `BuildDeploy` workflow calculates the release version from the latest stable
+`vX.Y.Z` tag, with a minimum baseline of `0.1.0`. A `minor` bump with channel
+`none` creates the next stable minor version: from `v1.1.0`, it produces
+`1.2.0` and tag `v1.2.0`. The workflow passes this calculated version directly
+to MinVer during package creation and uses it for the GitHub release.
+
 `BuildDeploy` signs the unsigned NuGet artifacts on `ubuntu-latest` using the
 headless ssign PKCS11 module and jsign. Configure these secrets in the GitHub
 `release` environment before dispatching a release:

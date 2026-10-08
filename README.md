@@ -31,7 +31,7 @@ Manual MCP configuration using NuGet:
       "type": "stdio",
       "command": "dnx",
       "args": [
-        "UIInspect.MCP.Server@0.2.1-alpha.0.1",
+        "UIInspect.MCP.Server@1.2.0",
         "--prerelease",
         "--yes"
       ]
@@ -45,7 +45,7 @@ Some clients use `servers` instead of `mcpServers`; only the outer property name
 The NUKE build stamps every literal `UIInspect.MCP.Server` package coordinate in this README with the MinVer package version before packaging:
 
 ```powershell
-dnx UIInspect.MCP.Server@0.2.1-alpha.0.1 --yes
+dnx UIInspect.MCP.Server@1.2.0 --yes
 ```
 
 ## Codex Skill
@@ -74,13 +74,13 @@ The package includes the `uiinspect` Codex skill and its MCP dependency metadata
 Install the skill explicitly and create the Codex home when needed. This command installs the skill and exits without starting the MCP server:
 
 ```powershell
-dnx UIInspect.MCP.Server@0.2.1-alpha.0.1 --yes -- --install-codex-skill
+dnx UIInspect.MCP.Server@1.2.0 --yes -- --install-codex-skill
 ```
 
 To deliberately replace an existing installed copy with the packaged version:
 
 ```powershell
-dnx UIInspect.MCP.Server@0.2.1-alpha.0.1 --yes -- --install-codex-skill --force
+dnx UIInspect.MCP.Server@1.2.0 --yes -- --install-codex-skill --force
 ```
 
 Set `CODEX_HOME` before either command when Codex uses a non-default location. The skill is installed at `<Codex home>\skills\uiinspect`.
