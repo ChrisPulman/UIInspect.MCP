@@ -1,6 +1,14 @@
 # Security
 
-UIInspect.MCP treats Windows UI Automation as a privileged semantic interface. Accessibility trees can expose application structure and actions can change application state, so access is denied by default.
+UIInspect.MCP treats Windows UI Automation as a privileged semantic interface. Accessibility trees can expose application structure and actions can change application state, so access is denied by default unless the server owner explicitly selects unrestricted startup operation.
+
+## Unrestricted startup operation
+
+Start the server with `--unrestricted` or `UIINSPECT_UNRESTRICTED=true` to authorize all supported UIInspect operations for its entire lifetime. Direct attachment needs no consent request. This mode has no native consent dialogs, approval broker dependency, lease expiry, or per-minute rate limits. It is a local startup decision, never an MCP tool parameter or a caller-name exception. Changing the options object after the coordinator starts cannot enable this mode.
+
+Process identity checks, session ownership, bounded snapshots, password redaction, and audit records still apply. Windows integrity and interactive-session restrictions still apply. Stop the server and remove the startup option to restore normal consent behavior; revoking a broker lease does not revoke startup authorization.
+
+MCP host approval policy is separate. Configure the host's per-server tool policy when unattended calls are required; UIInspect cannot change that policy itself.
 
 ## Consent and identity
 
@@ -45,7 +53,7 @@ The MCP stdio transport is a subprocess pipe, not an authenticated agent identit
 
 ## Rate limits
 
-Defaults:
+Defaults in normal consent mode (unrestricted startup bypasses these limits):
 
 - Discovery: 30/minute.
 - New consent dialogs: 3/minute per client. Cached decisions do not consume permits, and the native prompt itself appears at most once per client and exact process instance in a server session.

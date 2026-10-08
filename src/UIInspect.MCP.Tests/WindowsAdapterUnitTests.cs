@@ -19,6 +19,15 @@ public sealed class WindowsAdapterUnitTests
     /// <summary>The deterministic test process ID.</summary>
     private const int ProcessId = 1;
 
+    /// <summary>The shared button control and class identity.</summary>
+    private const string ButtonIdentity = "Button";
+
+    /// <summary>The mismatching semantic identity.</summary>
+    private const string OtherIdentity = "Other";
+
+    /// <summary>The ordinal of the second fallback match.</summary>
+    private const int SecondFallbackOrdinal = 2;
+
     /// <summary>The deterministic test window handle.</summary>
     private const long WindowHandle = 1;
 
@@ -71,7 +80,7 @@ public sealed class WindowsAdapterUnitTests
     [Test]
     public async Task Element_matching_uses_stable_fallback_order()
     {
-        var byId = new ElementIdentity("Button", "save", "Save", "Button");
+        var byId = new ElementIdentity(ButtonIdentity, "save", "Save", ButtonIdentity);
         var byName = new ElementIdentity("Text", string.Empty, "Status", "TextBlock");
         var byClass = new ElementIdentity("Pane", string.Empty, string.Empty, "CustomPane");
         var siblings = new[] { byId, byName, byId, byClass };
@@ -80,11 +89,37 @@ public sealed class WindowsAdapterUnitTests
         await Assert.That(ElementMatching.Matches(byId with { ControlType = "Text" }, byId)).IsFalse();
         await Assert.That(ElementMatching.Matches(byId with { AutomationId = "other" }, byId)).IsFalse();
         await Assert.That(ElementMatching.Matches(byName, byName)).IsTrue();
-        await Assert.That(ElementMatching.Matches(byName with { Name = "Other" }, byName)).IsFalse();
+        await Assert.That(ElementMatching.Matches(byName with { Name = OtherIdentity }, byName)).IsFalse();
         await Assert.That(ElementMatching.Matches(byClass, byClass)).IsTrue();
-        await Assert.That(ElementMatching.Matches(byClass with { ClassName = "Other" }, byClass)).IsFalse();
+        await Assert.That(ElementMatching.Matches(byClass with { ClassName = OtherIdentity }, byClass)).IsFalse();
         await Assert.That(ElementMatching.CountPriorMatches(siblings, OtherProcessId, byId)).IsEqualTo(1);
         await Assert.That(ElementMatching.CountPriorMatches(siblings, 0, byId)).IsEqualTo(0);
+    }
+
+    /// <summary>Linear selector construction retains ordinals when sibling fallback identities overlap.</summary>
+    /// <returns>A task representing the assertions.</returns>
+    [Test]
+    public async Task Selector_ordinals_include_siblings_with_stronger_identity_properties()
+    {
+        var siblings = new[]
+        {
+            new ElementIdentity(ButtonIdentity, "save", "Save", ButtonIdentity),
+            new ElementIdentity(ButtonIdentity, string.Empty, "Save", ButtonIdentity),
+            new ElementIdentity(ButtonIdentity, string.Empty, string.Empty, ButtonIdentity),
+            new ElementIdentity("Text", string.Empty, "Save", ButtonIdentity),
+            new ElementIdentity(ButtonIdentity, "save", "Changed", OtherIdentity),
+        };
+        var selectors = ElementMatching.CreateSelectors(siblings);
+        for (var index = 0; index < siblings.Length; index++)
+        {
+            await Assert.That(selectors[index].Ordinal)
+                .IsEqualTo(ElementMatching.CountPriorMatches(siblings, index, siblings[index]));
+        }
+
+        await Assert.That(selectors[1].Ordinal).IsEqualTo(1);
+        await Assert.That(selectors[SecondFallbackOrdinal].Ordinal).IsEqualTo(SecondFallbackOrdinal);
+        await Assert.That(selectors[4].Ordinal).IsEqualTo(1);
+        await Assert.That(ElementMatching.CreateSelectors([]).Length).IsEqualTo(0);
     }
 
     /// <summary>Window eligibility and attachment invariants reject unusable roots.</summary>

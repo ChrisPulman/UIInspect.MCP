@@ -14,6 +14,9 @@ namespace UIInspect.MCP.Windows.Automation;
 public sealed class FlaUiAutomationSession : IUiAutomationSession
 {
     /// <summary>Error code returned when an element does not expose the required UIA pattern.</summary>
+    private const string UnknownControlType = "Unknown";
+
+    /// <summary>Error code for an unsupported pattern.</summary>
     private const string PatternNotSupportedCode = "pattern_not_supported";
 
     /// <summary>Initial capacity for a bounded tree snapshot.</summary>
@@ -49,10 +52,16 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     /// <summary>Session-scoped opaque element references and their semantic locators.</summary>
-    private readonly Dictionary<string, ElementLocator> _locators = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ElementLocator> _locators = [];
+
+    /// <summary>Serializes operation registration and disposal.</summary>
+    private readonly Lock _lifetimeLock = new();
+
+    /// <summary>Shared completion of disposal.</summary>
+    private Task? _disposalTask;
 
     /// <summary>Whether the owned automation client has been disposed.</summary>
-    private bool _disposed;
+    private volatile bool _disposed;
 
     /// <summary>Monotonically increasing generation used to invalidate stale references.</summary>
     private long _generation;
@@ -90,9 +99,10 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
         ArgumentOutOfRangeException.ThrowIfLessThan(maxDepth, 0);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxNodes, 1);
 
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await EnterAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             var root = GetRoot();
             _locators.Clear();
             var generation = ++_generation;
@@ -127,12 +137,7 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
                     continue;
                 }
 
-                for (var index = 0; index < children.Length; index++)
-                {
-                    var selector = CreateSelector(children, index);
-                    var childSegments = AppendSegment(current.Segments, selector);
-                    pending.Enqueue(new(children[index], reference, childSegments, current.Depth + 1));
-                }
+                truncated |= EnqueueChildren(children, current, reference, maxNodes - nodes.Count - pending.Count, pending, cancellationToken);
             }
 
             return new(sessionId, generation, nodes, truncated);
@@ -170,6 +175,27 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
             elementReference,
             static element =>
             {
+                var invoke = element.Patterns.Invoke.PatternOrDefault;
+                if (invoke is not null)
+                {
+                    invoke.Invoke();
+                    return PlatformActionResult.Ok("The resolved element was invoked without moving the pointer.");
+                }
+
+                var selection = element.Patterns.SelectionItem.PatternOrDefault;
+                if (selection is not null)
+                {
+                    selection.Select();
+                    return PlatformActionResult.Ok("The resolved element was selected without moving the pointer.");
+                }
+
+                var toggle = element.Patterns.Toggle.PatternOrDefault;
+                if (toggle is not null)
+                {
+                    toggle.Toggle();
+                    return PlatformActionResult.Ok("The resolved element was toggled without moving the pointer.");
+                }
+
                 element.Click();
                 return PlatformActionResult.Ok("The resolved element was clicked.");
             },
@@ -261,6 +287,12 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
             element =>
             {
                 element.Focus();
+                if (!UiaOperationGuard.Read(() => element.Properties.HasKeyboardFocus.ValueOrDefault, false)
+                    || UiaOperationGuard.Read(() => _automation.FocusedElement().Properties.ProcessId.Value, 0) != Target.ProcessId)
+                {
+                    return PlatformActionResult.Fail("focus_failed", "Keyboard focus could not be verified on the target element; no key was sent.");
+                }
+
                 Keyboard.Press(virtualKey);
                 return PlatformActionResult.Ok($"Logical key {key.ToUpperInvariant()} was sent.");
             },
@@ -269,16 +301,53 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
     /// <inheritdoc/>
     public ValueTask DisposeAsync()
     {
-        if (_disposed)
+        Task completion;
+        lock (_lifetimeLock)
         {
-            return ValueTask.CompletedTask;
+            if (_disposalTask is null)
+            {
+                _disposed = true;
+                _disposalTask = DisposeCoreAsync();
+            }
+
+            completion = _disposalTask;
         }
 
-        _locators.Clear();
-        _automation.Dispose();
-        _gate.Dispose();
-        _disposed = true;
-        return ValueTask.CompletedTask;
+        return new(completion);
+    }
+
+    /// <summary>Enqueues only children that fit within the remaining snapshot budget.</summary>
+    /// <param name="children">Provider children.</param>
+    /// <param name="current">Parent traversal data.</param>
+    /// <param name="reference">Parent reference.</param>
+    /// <param name="remaining">Remaining node budget.</param>
+    /// <param name="pending">Traversal queue.</param>
+    /// <param name="cancellationToken">Operation cancellation.</param>
+    /// <returns>Whether children exceeded the budget.</returns>
+    private static bool EnqueueChildren(
+        AutomationElement[] children,
+        PendingElement current,
+        string reference,
+        int remaining,
+        Queue<PendingElement> pending,
+        CancellationToken cancellationToken)
+    {
+        var childCount = Math.Min(children.Length, remaining);
+        var identities = new ElementIdentity[childCount];
+        for (var index = 0; index < childCount; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            identities[index] = ReadIdentity(children[index]);
+        }
+
+        var selectors = ElementMatching.CreateSelectors(identities);
+        for (var index = 0; index < childCount; index++)
+        {
+            var childSegments = AppendSegment(current.Segments, selectors[index]);
+            pending.Enqueue(new(children[index], reference, childSegments, current.Depth + 1));
+        }
+
+        return childCount < children.Length;
     }
 
     /// <summary>Creates a safe, serializable snapshot node for a UIA element.</summary>
@@ -314,7 +383,7 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
             parentReference,
             stablePath,
             depth,
-            UiaOperationGuard.Read(() => element.ControlType.ToString(), "Unknown"),
+            UiaOperationGuard.Read(() => element.ControlType.ToString(), UnknownControlType),
             isPassword ? "[redacted]" : UiaOperationGuard.ReadString(() => element.Name),
             UiaOperationGuard.ReadString(() => element.AutomationId),
             UiaOperationGuard.ReadString(() => element.ClassName),
@@ -353,28 +422,6 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
         }
     }
 
-    /// <summary>Creates a selector for one sibling using a stable ordinal among semantic matches.</summary>
-    /// <param name="siblings">Sibling UIA elements.</param>
-    /// <param name="index">Selected sibling index.</param>
-    /// <returns>The selector for the selected sibling.</returns>
-    private static ElementSelector CreateSelector(AutomationElement[] siblings, int index)
-    {
-        var identities = new ElementIdentity[siblings.Length];
-        for (var siblingIndex = 0; siblingIndex < siblings.Length; siblingIndex++)
-        {
-            identities[siblingIndex] = ReadIdentity(siblings[siblingIndex]);
-        }
-
-        var identity = identities[index];
-        var ordinal = ElementMatching.CountPriorMatches(identities, index, identity);
-        return new(
-            identity.ControlType,
-            identity.AutomationId,
-            identity.Name,
-            identity.ClassName,
-            ordinal);
-    }
-
     /// <summary>Appends a semantic selector without allocating through LINQ.</summary>
     /// <param name="segments">Existing path segments.</param>
     /// <param name="selector">Selector to append.</param>
@@ -396,7 +443,7 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
     /// <returns>The semantic identity.</returns>
     private static ElementIdentity ReadIdentity(AutomationElement element) =>
         new(
-            UiaOperationGuard.Read(() => element.ControlType.ToString(), "Unknown"),
+            UiaOperationGuard.Read(() => element.ControlType.ToString(), UnknownControlType),
             UiaOperationGuard.ReadString(() => element.AutomationId),
             UiaOperationGuard.ReadString(() => element.Name),
             UiaOperationGuard.ReadString(() => element.ClassName));
@@ -405,14 +452,53 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
     /// <param name="element">Candidate UIA element.</param>
     /// <param name="selector">Expected semantic selector.</param>
     /// <returns><see langword="true"/> when the candidate matches.</returns>
-    private static bool Matches(AutomationElement element, ElementSelector selector) =>
-        ElementMatching.Matches(
-            ReadIdentity(element),
-            new(
-                selector.ControlType,
-                selector.AutomationId,
-                selector.Name,
-                selector.ClassName));
+    private static bool Matches(AutomationElement element, ElementSelector selector)
+    {
+        if (!string.Equals(UiaOperationGuard.Read(() => element.ControlType.ToString(), UnknownControlType), selector.ControlType, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrEmpty(selector.AutomationId))
+        {
+            return string.Equals(UiaOperationGuard.ReadString(() => element.AutomationId), selector.AutomationId, StringComparison.Ordinal);
+        }
+
+        return !string.IsNullOrEmpty(selector.Name)
+            ? string.Equals(UiaOperationGuard.ReadString(() => element.Name), selector.Name, StringComparison.Ordinal)
+            : string.Equals(UiaOperationGuard.ReadString(() => element.ClassName), selector.ClassName, StringComparison.Ordinal);
+    }
+
+    /// <summary>Registers a serialized operation before disposal can enqueue behind it.</summary>
+    /// <param name="cancellationToken">Operation cancellation.</param>
+    /// <returns>The gate acquisition task.</returns>
+    private Task EnterAsync(CancellationToken cancellationToken)
+    {
+        Task acquisition;
+        lock (_lifetimeLock)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            acquisition = _gate.WaitAsync(cancellationToken);
+        }
+
+        return acquisition;
+    }
+
+    /// <summary>Drains registered operations before disposing owned resources.</summary>
+    /// <returns>The disposal completion task.</returns>
+    private async Task DisposeCoreAsync()
+    {
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            _locators.Clear();
+            _automation.Dispose();
+        }
+        finally
+        {
+            _gate.Dispose();
+        }
+    }
 
     /// <summary>Resolves an opaque reference and executes a serialized UIA action.</summary>
     /// <param name="elementReference">Opaque element reference from the latest inspection.</param>
@@ -426,9 +512,10 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrWhiteSpace(elementReference);
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await EnterAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             if (!_locators.TryGetValue(elementReference, out var locator))
             {
                 return PlatformActionResult.Fail("stale_element", "The element reference is absent or stale; inspect the tree again.");
@@ -468,22 +555,29 @@ public sealed class FlaUiAutomationSession : IUiAutomationSession
         var current = GetRoot();
         foreach (var selector in locator.Segments)
         {
-            var matches = new List<AutomationElement>();
+            AutomationElement? selected = null;
+            var ordinal = 0;
             var children = current.FindAllChildren();
             foreach (var child in children)
             {
                 if (Matches(child, selector))
                 {
-                    matches.Add(child);
+                    if (ordinal == selector.Ordinal)
+                    {
+                        selected = child;
+                        break;
+                    }
+
+                    ordinal++;
                 }
             }
 
-            if (selector.Ordinal >= matches.Count)
+            if (selected is null)
             {
                 return null;
             }
 
-            current = matches[selector.Ordinal];
+            current = selected;
         }
 
         return current;

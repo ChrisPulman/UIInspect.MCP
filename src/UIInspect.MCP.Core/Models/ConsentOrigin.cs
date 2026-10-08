@@ -11,4 +11,7 @@ public enum ConsentOrigin
 
     /// <summary>The user activated a Windows-session-scoped unattended approval lease.</summary>
     UnattendedApprovalLease,
+
+    /// <summary>The server owner explicitly enabled unrestricted access at startup.</summary>
+    UnrestrictedStartup,
 }

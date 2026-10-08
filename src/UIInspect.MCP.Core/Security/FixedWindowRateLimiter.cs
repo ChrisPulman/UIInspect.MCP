@@ -11,7 +11,7 @@ namespace UIInspect.MCP.Core.Security;
 public sealed class FixedWindowRateLimiter : IOperationRateLimiter
 {
     /// <summary>Timestamp queues grouped by non-secret rate bucket.</summary>
-    private readonly Dictionary<string, Queue<DateTimeOffset>> _buckets = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Queue<DateTimeOffset>> _buckets = [];
 
     /// <summary>Serializes access to the bucket dictionary and its queues.</summary>
     private readonly Lock _gate = new();

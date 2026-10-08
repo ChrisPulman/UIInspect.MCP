@@ -50,6 +50,25 @@ dnx UIInspect.MCP.Server@0.2.1-alpha.0.1 --yes
 
 ## Codex Skill
 
+### Prompt-free unattended operation
+
+Start the server with `uiinspect-mcp --unrestricted`, or set `UIINSPECT_UNRESTRICTED=true` in its MCP server environment and restart it. For `dnx`, pass the server option after `--` (for example, append `-- --unrestricted` to the command above).
+
+This explicit server-owner configuration enables all inspection, interaction and logical keyboard capabilities for the server lifetime. Agents can discover and attach directly without requesting consent. There are no UIInspect approval dialogs, consent expiry, broker IPC or operation rate limits in this mode. `uiinspect_get_unattended_approval` reports an authorization expiry of `DateTimeOffset.MaxValue`. Stop the server and remove the startup option or environment variable to disable it; no MCP tool can enable this mode.
+
+Exact process identity checks, per-client session ownership, bounded tree responses, stale-element detection and audit records remain active. Prefer semantic operations to minimize foreground and cursor disruption. Keyboard and physical-click fallbacks may still require focus. Host application MCP approval prompts are controlled by that host's configuration and cannot be disabled by this server. The default startup continues to use the existing Windows approval policy.
+
+For Codex, configure its separate server tool policy as well:
+
+```toml
+[mcp_servers.uiinspect-mcp]
+command = "uiinspect-mcp"
+args = ["--unrestricted"]
+default_tools_approval_mode = "approve"
+```
+
+Use a package version containing unrestricted startup support, or point the command at a locally built server. Restart the MCP connection after changing configuration. Codex documents its host policy separately in the [MCP configuration reference](https://learn.chatgpt.com/docs/extend/mcp).
+
 The package includes the `uiinspect` Codex skill and its MCP dependency metadata. When the packaged server starts, it installs missing skill files into an existing Codex home: `CODEX_HOME` when it is set and exists, otherwise `%USERPROFILE%\.codex` when that directory exists. Automatic installation never overwrites existing skill files.
 
 Install the skill explicitly and create the Codex home when needed. This command installs the skill and exits without starting the MCP server:
