@@ -46,7 +46,7 @@ jobs:
     environment:
       name: release
     outputs:
-      semver2: ${{ steps.minver.outputs.NuGetPackageVersion }}
+      semver2: ${{ steps.release-version.outputs.version }}
       tag: ${{ steps.tagname.outputs.tag }}
       prerelease: ${{ steps.tagname.outputs.prerelease }}
       sourceSha: ${{ steps.sourcesha.outputs.sha }}
@@ -168,7 +168,6 @@ jobs:
         with:
           dotnet-version: |
             10.0.x
-          dotnet-quality: 'preview'
           cache: true
           cache-dependency-path: |
             **/Directory.Packages.props
@@ -189,20 +188,10 @@ jobs:
         working-directory: ${{ env.solutionFolder }}
         run: dotnet workload restore ${{ env.solutionFile }} --from-previous-sdk --skip-manifest-update
 
-      - name: Stamp version with MinVer
-        id: minver
-        uses: reactiveui/actions-common/.github/actions/minver@main
-        with:
-          tag-prefix: v
-          minimum-major-minor: ${{ env.minMajorMinorVersion }}
-          auto-increment: patch
-          default-pre-release-identifiers: alpha.0
-          version-override: ${{ steps.release-version.outputs.version }}
-
       - name: Build and pack unsigned NuGet packages
         shell: pwsh
         env:
-          MinVerVersionOverride: ${{ steps.minver.outputs.SemVer2 }}
+          MinVerVersionOverride: ${{ steps.release-version.outputs.version }}
         run: .\build.ps1 Pack --configuration "${{ env.configuration }}"
 
       - name: Upload unsigned packages
